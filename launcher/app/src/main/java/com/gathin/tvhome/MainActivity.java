@@ -882,13 +882,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // Cold start or column count > 4: the first focus can run before the grid has its final width or
             // padding, leaving the glass at the XML design size until a key is pressed.
             grid.post(this::refitGlass);
+            // The dock row moves when the padding is applied; the bar may have been positioned from the
+            // pre-layout top and would hide below its 100dp threshold.
+            grid.post(this::updateNowPlayingDockTop);
         });
 
         // Keep the glass glued to its tile while the grid scrolls.
         grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
-                if (nowPlaying != null && nowPlaying.isVisible()) updateNowPlayingDockTop();
+                if (nowPlaying != null) updateNowPlayingDockTop();
                 if (!glassShown) return;
                 glassTargetY -= dy;
                 glassScrollShift -= dy;
@@ -2655,7 +2658,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int lastNowPlayingDockTop = Integer.MIN_VALUE;
 
     private void updateNowPlayingDockTop() {
-        if (nowPlaying == null || !nowPlaying.isVisible() || grid == null) return;
+        // Run even while the bar is hidden: a stale dock top is exactly what keeps it below the
+        // 100dp fit threshold and prevents it from ever appearing.
+        if (nowPlaying == null || grid == null) return;
         RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(0);
         if (vh == null) return;
         View card = vh.itemView.findViewById(R.id.card);
@@ -4726,6 +4731,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             dockPaddingPending = false;
         });
         grid.post(this::refitGlass);
+        grid.post(this::updateNowPlayingDockTop);
     }
 
     private int nextOpacity(int current) {
