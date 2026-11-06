@@ -739,7 +739,11 @@ final class Cards {
         int start = 0;
         for (int i = 0; i <= text.length(); i++) {
             if (i == text.length() || text.charAt(i) == '\n') {
-                lines.add(text.substring(start, i));
+                // A file written on Windows ends every line with "\r\n"; the "\r" is not part of the
+                // record and used to make an otherwise valid store decode as null.
+                int end = i;
+                if (end > start && text.charAt(end - 1) == '\r') end -= 1;
+                lines.add(text.substring(start, end));
                 start = i + 1;
             }
         }

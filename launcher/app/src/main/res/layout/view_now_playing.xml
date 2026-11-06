@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/nowPlayingCard"
+    android:layout_width="match_parent"
+    android:layout_height="112dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="0dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="0dp"
+    android:paddingBottom="0dp"
+    android:background="@drawable/now_playing_bg_liquid"
+    android:clipChildren="true"
+    android:clipToOutline="true"
+    android:outlineProvider="background"
+    android:visibility="gone"
+    android:focusable="false"
+    android:importantForAccessibility="no">
+
+    <!-- 1. Edge-to-edge artwork + track info; a short press opens the media app. -->
+    <LinearLayout
+        android:id="@+id/npOpen"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:focusable="true"
+        android:clickable="true"
+        android:contentDescription="@string/now_playing">
+
+    <FrameLayout
+        android:id="@+id/npCoverBox"
+        android:layout_width="112dp"
+        android:layout_height="match_parent"
+        android:clipChildren="false">
+
+    <FrameLayout
+        android:id="@+id/npArtFrame"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipChildren="false">
+
+        <com.gathin.tvhome.LeftRoundedFrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <ImageView
+                android:id="@+id/npArtwork"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:importantForAccessibility="no" />
+        </com.gathin.tvhome.LeftRoundedFrameLayout>
+
+        <!-- Source app badge overlapping the cover's lower-right corner. -->
+        <ImageView
+            android:id="@+id/npSourceBadge"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="bottom|end"
+            android:layout_marginEnd="0dp"
+            android:layout_marginBottom="0dp"
+            android:translationX="3dp"
+            android:background="@drawable/bg_source_badge"
+            android:padding="3dp"
+            android:scaleType="fitCenter"
+            android:contentDescription="@string/np_source_badge_label" />
+
+        <View
+            android:id="@+id/npCoverFocus"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/now_playing_cover_focus"
+            android:visibility="invisible"
+            android:importantForAccessibility="no" />
+    </FrameLayout>
+
+        <com.gathin.tvhome.RadialAuraView
+            android:id="@+id/npAura"
+            android:layout_width="112dp"
+            android:layout_height="112dp"
+            android:layout_gravity="center"
+            android:visibility="gone"
+            android:importantForAccessibility="no" />
+    </FrameLayout>
+
+    <!-- 2. Track and artist, fixed compact block. -->
+    <LinearLayout
+        android:id="@+id/npTrackInfo"
+        android:layout_width="172dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="10dp"
+        android:orientation="vertical"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/npTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="marquee"
+            android:marqueeRepeatLimit="marquee_forever"
+            android:focusable="false"
+            android:textColor="#FFFFFFFF"
+            android:textSize="18sp"
+            android:shadowColor="#AA000000"
+            android:shadowDx="0"
+            android:shadowDy="1"
+            android:shadowRadius="4"
+            android:textStyle="bold"
+            android:fontFamily="@string/font_medium" />
+
+        <TextView
+            android:id="@+id/npSubtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp"
+            android:shadowColor="#99000000"
+            android:shadowDx="0"
+            android:shadowDy="1"
+            android:shadowRadius="3"
+            android:fontFamily="@string/font_regular" />
+    </LinearLayout>
+    </LinearLayout>
+
+    <!-- 3. Long center: progress row above, transport controls below. -->
+    <LinearLayout
+        android:id="@+id/npCenter"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="8dp"
+        android:orientation="vertical"
+        android:gravity="center_vertical">
+
+        <LinearLayout
+            android:id="@+id/npProgress"
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/npElapsed"
+                android:layout_width="44dp"
+                android:layout_height="wrap_content"
+                android:gravity="end|center_vertical"
+                android:layout_marginEnd="8dp"
+                android:fontFamily="monospace"
+                android:textColor="#CCFFFFFF"
+                android:textSize="11sp" />
+
+            <com.gathin.tvhome.WaveformSeekBar
+                android:id="@+id/npWaveform"
+                android:layout_width="0dp"
+                android:layout_height="28dp"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="10dp"
+                android:focusable="true"
+                android:contentDescription="@string/now_playing" />
+
+            <TextView
+                android:id="@+id/npDuration"
+                android:layout_width="44dp"
+                android:layout_height="wrap_content"
+                android:gravity="start|center_vertical"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:textColor="#80FFFFFF"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/npControls"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageButton
+                android:id="@+id/npPrev"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:background="@drawable/now_playing_icon_button"
+                android:src="@drawable/ic_previous"
+                android:padding="8dp"
+                android:tint="#CCFFFFFF"
+                android:contentDescription="@string/previous" />
+
+            <ImageButton
+                android:id="@+id/npPlay"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="14dp"
+                android:layout_marginEnd="14dp"
+                android:background="@drawable/now_playing_play_bg"
+                android:src="@drawable/ic_pause"
+                android:padding="10dp"
+                android:tint="#FF000000"
+                android:contentDescription="@string/pause" />
+
+            <ImageButton
+                android:id="@+id/npNext"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:background="@drawable/now_playing_icon_button"
+                android:src="@drawable/ic_next"
+                android:padding="8dp"
+                android:tint="#CCFFFFFF"
+                android:contentDescription="@string/next" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 4. Right actions, divided from the play area. -->
+    <View
+        android:layout_width="1dp"
+        android:layout_height="40dp"
+        android:layout_marginEnd="4dp"
+        android:background="#1AFFFFFF" />
+
+    <LinearLayout
+        android:id="@+id/npActions"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageButton
+            android:id="@+id/npFullscreen"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/now_playing_icon_button"
+            android:src="@drawable/ic_fullscreen"
+            android:padding="8dp"
+            android:tint="#B3FFFFFF"
+            android:contentDescription="@string/now_playing_full_label" />
+
+        <ImageButton
+            android:id="@+id/npClose"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/now_playing_icon_button"
+            android:src="@drawable/ic_close"
+            android:padding="8dp"
+            android:tint="#99FFFFFF"
+            android:contentDescription="@string/close_now_playing" />
+    </LinearLayout>
+</LinearLayout>

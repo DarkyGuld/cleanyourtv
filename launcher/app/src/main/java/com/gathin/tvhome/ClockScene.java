@@ -24,6 +24,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * The clock screensaver's scene (layout dream_clock): the thin clock and date on black over a slow ambient
@@ -54,8 +57,17 @@ final class ClockScene {
     private File wallpaperFile;
     private int wallpaperShade;
     private Resources wallpaperRes;
-    /** One number per decode request: a result whose number is no longer the current one is dropped. Main thread only. */
-    private int wallpaperGeneration;
+    /** One number per decode request: a result whose number is no longer the current one is dropped. */
+    private volatile int wallpaperGeneration;
+    /** Media lookups and decodes share one cancellable executor, never a thread per request. */
+    private final ExecutorService wallpaperExecutor =
+            Executors.newSingleThreadExecutor(r -> new Thread(r, "clock-wallpaper"));
+    private Future<?> wallpaperFuture;
+    private int mediaGeneration;
+    private boolean running;
+    private final ArgbEvaluator glowMix = new ArgbEvaluator();
+    private int glowStepIndex, glowFrom, glowTo;
+    private final Runnable glowStep;
     /** clock_wallpaper with a collection: the pictures, how long each lasts, and how the next one is picked. */
     private List<File> rotation;
     private long rotationMs;
@@ -74,8 +86,27 @@ final class ClockScene {
         }
     };
 
+    /** The first-frame fade; kept apart from the timers so stop() can leave it to its running check. */
+    private final Runnable attach = this::attachContent;
+
+    private void attachContent() {
+        if (!running) return;
+        placeClock();
+        content.animate().alpha(1f).setDuration(1200).start();
+    }
+
+    /** One reusable glow transition instead of sixteen posted lambdas. */
+    private void stepGlow() {
+        if (!running || glowStepIndex >= GLOW_STEPS) return;
+        glowStepIndex++;
+        float f = (float) glowStepIndex / GLOW_STEPS;
+        setGlow((int) glowMix.evaluate(f, glowFrom, glowTo));
+        if (glowStepIndex < GLOW_STEPS) handler.postDelayed(glowStep, GLOW_STEP_MS);
+    }
+
     /** root is the inflated dream_clock layout. */
     ClockScene(View root) {
+        glowStep = this::stepGlow;
         content = root.findViewById(R.id.dreamContent);
         clockRefresh = new ClockRefresh(content);
         ambient = root.findViewById(R.id.dreamAmbient);
@@ -89,11 +120,10 @@ final class ClockScene {
     }
 
     void start() {
+        running = true;
         content.setAlpha(0f);
-        content.post(() -> {
-            placeClock();
-            content.animate().alpha(1f).setDuration(1200).start();
-        });
+        content.removeCallbacks(attach);
+        content.post(attach);
         handler.removeCallbacks(tick);
         handler.postDelayed(tick, MOVE_MS);
         clockRefresh.start();
@@ -101,10 +131,20 @@ final class ClockScene {
     }
 
     void stop() {
-        handler.removeCallbacksAndMessages(null);   // the tick and any glow steps still queued
+        running = false;
+        handler.removeCallbacks(tick);
+        handler.removeCallbacks(glowStep);
         clockRefresh.stop();
         content.animate().cancel();
         wallpaperGeneration++;   // a decode still running must not attach its picture to a stopped scene
+        mediaGeneration++;
+        cancelWallpaperFuture();
+    }
+
+    /** The scene is leaving for good (Activity destroyed or dream detached). */
+    void close() {
+        stop();
+        wallpaperExecutor.shutdownNow();
     }
 
     /**
@@ -114,6 +154,45 @@ final class ClockScene {
      * the glow stays.
      * Call before start(), which starts the decode (again after a stop() that dropped an unfinished one).
      */
+    /** Uses the current media artwork instead of the wallpaper; the clock stays on top. */
+    void useMediaArt(Bitmap bitmap) {
+        if (bitmap == null) return;
+        wallpaperGeneration++;
+        cancelWallpaperFuture();
+        wallpaperFile = null;
+        rotation = null;
+        wallpaperShown = true;
+        ambient.setBackground(null);
+        ambient.setColorFilter(new android.graphics.PorterDuffColorFilter(0x88101419,
+                android.graphics.PorterDuff.Mode.SRC_OVER));
+        ambient.setImageBitmap(bitmap);
+    }
+
+    /**
+     * Reads the current media session off the main thread, then posts the result only while this scene is
+     * still alive. It never blocks the clock's first frame: the wallpaper or glow is already configured.
+     */
+    void loadMediaArt(Context context, java.util.function.Consumer<MediaArt.Entry> done) {
+        final int generation = ++mediaGeneration;
+        try {
+            wallpaperExecutor.execute(() -> {
+                MediaArt.Entry entry = null;
+                try {
+                    entry = Config.screensaverMedia(context) ? MediaArt.current(context) : null;
+                } catch (RuntimeException ignored) {
+                }
+                final MediaArt.Entry result = entry;
+                handler.post(() -> {
+                    if (generation == mediaGeneration) done.accept(result);
+                });
+            });
+        } catch (RuntimeException ignored) {
+            handler.post(() -> {
+                if (generation == mediaGeneration) done.accept(null);
+            });
+        }
+    }
+
     void useHomeWallpaper(Context ctx) {
         Config cfg;
         try {
@@ -157,25 +236,42 @@ final class ClockScene {
         File file = wallpaperFile;
         int shade = wallpaperShade;
         Resources res = wallpaperRes;
+        if (file == null || res == null) return;
         DisplayMetrics dm = res.getDisplayMetrics();
         int w = dm.widthPixels, h = dm.heightPixels;
         int generation = ++wallpaperGeneration;
-        new Thread(() -> {
-            Bitmap bmp = decode(file, w, h);
-            if (bmp == null) return;
-            handler.post(() -> {
-                if (generation != wallpaperGeneration || wallpaperShown) {
-                    bmp.recycle();   // stopped meanwhile (or already shown): this picture was never attached
+        cancelWallpaperFuture();
+        try {
+            wallpaperFuture = wallpaperExecutor.submit(() -> {
+                Bitmap bmp = decode(file, w, h);
+                if (bmp == null) return;
+                if (generation != wallpaperGeneration || Thread.currentThread().isInterrupted()) {
+                    bmp.recycle();   // stopped or replaced while this decode ran
                     return;
                 }
-                wallpaperShown = true;
-                // As the image, not the background: a background is stretched to the view, so a picture of
-                // another shape than the screen would be distorted. centerCrop scales and crops it like Home.
-                ambient.setBackground(null);
-                ambient.setImageDrawable(new LayerDrawable(new Drawable[]{
-                        new BitmapDrawable(res, bmp), new ColorDrawable(shade)}));
+                handler.post(() -> {
+                    if (generation != wallpaperGeneration || wallpaperShown) {
+                        bmp.recycle();   // stopped meanwhile (or already shown): this picture was never attached
+                        return;
+                    }
+                    wallpaperShown = true;
+                    // As the image, not the background: a background is stretched to the view, so a picture of
+                    // another shape than the screen would be distorted. centerCrop scales and crops it like Home.
+                    ambient.setBackground(null);
+                    ambient.setImageDrawable(new LayerDrawable(new Drawable[]{
+                            new BitmapDrawable(res, bmp), new ColorDrawable(shade)}));
+                });
             });
-        }, "clock-wallpaper").start();
+        } catch (RuntimeException ignored) {
+            // executor stopped: keep the glow
+        }
+    }
+
+    private void cancelWallpaperFuture() {
+        if (wallpaperFuture != null) {
+            wallpaperFuture.cancel(true);
+            wallpaperFuture = null;
+        }
     }
 
     /** WallpaperPlayer's decode: sampled and scaled down to cover the screen, never bigger than 4K. */
@@ -251,14 +347,12 @@ final class ClockScene {
 
     private void shiftGlow() {
         if (wallpaperShown) return;
-        int from = glowColor;
+        glowFrom = glowColor;
         colorIndex = (colorIndex + 1) % PALETTE.length;
-        int to = PALETTE[colorIndex];
-        ArgbEvaluator mix = new ArgbEvaluator();
-        for (int i = 1; i <= GLOW_STEPS; i++) {
-            float f = (float) i / GLOW_STEPS;
-            handler.postDelayed(() -> setGlow((int) mix.evaluate(f, from, to)), i * GLOW_STEP_MS);
-        }
+        glowTo = PALETTE[colorIndex];
+        glowStepIndex = 0;
+        handler.removeCallbacks(glowStep);
+        handler.postDelayed(glowStep, GLOW_STEP_MS);
     }
 
     private void setGlow(int color) {

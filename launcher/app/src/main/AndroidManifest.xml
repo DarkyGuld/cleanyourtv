@@ -7,7 +7,9 @@
     <uses-feature android:name="android.hardware.wifi" android:required="false" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Needed since Android 10 to read the Wi-Fi network name for the network pill. Never requested at
          runtime: build-and-install grants it with pm grant, so lint's Android 12 "ask for COARSE with
@@ -60,6 +62,19 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
         </intent>
+        <!-- Standard icon-pack theme filters: without these, target 30 package visibility hides packs
+             that have no launcher activity (the picker then shows only the built-in styles). -->
+        <intent><action android:name="org.adw.launcher.THEMES" /></intent>
+        <intent><action android:name="com.gau.go.launcherex.theme" /></intent>
+        <intent><action android:name="com.novalauncher.THEME" /></intent>
+        <intent><action android:name="com.anddoes.launcher.THEME" /></intent>
+        <intent><action android:name="com.teslacoilsw.launcher.THEME" /></intent>
+        <!-- AerialViews/Clock: resolve the system settings pages used by the screensaver section. -->
+        <intent><action android:name="android.settings.DREAM_SETTINGS" /></intent>
+        <intent><action android:name="android.settings.NOTIFICATION_LISTENER_SETTINGS" /></intent>
+        <intent><action android:name="android.settings.HOME_SETTINGS" /></intent>
+        <intent><action android:name="android.settings.MANAGE_DEFAULT_APPS_SETTINGS" /></intent>
+        <package android:name="com.android.tv.settings" />
         <!-- China-market MIUI TV firmware: the Settings and Wi-Fi pills fall back to Xiaomi's settings app.
              Fire TV: the real settings menu lives in the stock launcher (see settings_fallback_components). -->
         <package android:name="com.xiaomi.mitv.settings" />
@@ -110,7 +125,15 @@
             android:name=".LauncherSettingsActivity"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:screenOrientation="landscape" />
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.TvHome.Translucent" />
+
+        <activity
+            android:name=".NowPlayingFullActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.TvHome" />
         <!-- The system input switcher (com.android.tv.action.VIEW_INPUTS), which is what the remote's Input
              button becomes through the TV's Live TV app or InputKeyService. Disabled here and switched on by
              MainActivity only while handle_view_inputs is true (config.xml or a theme), for sets whose stock

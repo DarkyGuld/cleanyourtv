@@ -44,17 +44,22 @@ final class GuardKeep {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_OFF, off).commit();
     }
 
-    /** Puts HomeKeyService back on the enabled list when standby exit is opted in. Other services stay. */
+    /**
+     * Puts HomeKeyService back on the enabled list. The standby opt-in only decides whether to wait for the
+     * screen: when it is off, or the user is still locked (and its setting can't be read), the helper is
+     * put back now, since a later unlock sends no second SCREEN_ON.
+     */
     static void ensureHomeKey(Context context) {
         // The helper may already be bound. Arming only inside onServiceConnected misses an opt-in
         // that arrives after that, so the first screen-off does nothing (Philips 65PUS8102).
         HomeKeyService.applyStandbyOptIn();
-        if (!offInStandby(context)) return;
         if (context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS)
                 != PackageManager.PERMISSION_GRANTED) return;
         PowerManager power = context.getSystemService(PowerManager.class);
-        // Still off: binding the helper again would sit on the power key. Wait for the screen.
-        if (power != null && !power.isInteractive()) {
+        // Only the "leave in standby" path waits: still off, binding the helper again would sit on the power
+        // key. While locked offInStandby() reads false, and the lock screen is usually the screen that came
+        // on, so that screen-on must re-add the helper instead of leaving it off until a reboot.
+        if (offInStandby(context) && power != null && !power.isInteractive()) {
             watchScreenOn(context.getApplicationContext());
             return;
         }

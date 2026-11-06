@@ -1,5 +1,6 @@
 package com.gathin.tvhome;
 
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
@@ -18,6 +19,8 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     private final float density;
     private final Paint band = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint shine = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
 
     /** Extra band below the tiles for their names (always_show_names), in px. */
@@ -30,10 +33,27 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     private float shaderTop = Float.NaN, shaderBottom = Float.NaN;
     /** Draw the band and its edge (config.xml dock_band); false leaves the tiles floating on the wallpaper. */
     private final boolean bandVisible;
+    /** The cinematic shelf's band keeps the artwork visible; opacity changes still apply to its alpha. */
+    private final boolean translucent;
     /** single_row: the tiles after the dock share its row, so they take the same offsets to stay level with it. */
     private final boolean singleRow;
     /** dock_band_all: in a single row, the band runs behind every app instead of the dock apps only. */
     private final boolean bandAll;
+    /** 100 % glass transparency: keep a crisp rim so the dock (and its name strip) still has an edge. */
+    private final boolean rimOnly;
+
+    interface Listener {
+        /** The band's screen rect and radius, ready for a baked glass bitmap. */
+        void onBand(Rect screenRect, float radiusPx);
+    }
+
+    private Listener listener;
+    private final RectF reported = new RectF();
+    private float reportedRadius = -1f;
+    private Bitmap glass;
+    private final Paint glassPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final RectF glassRect = new RectF();
+    private float glassRadius;
 
     /**
      * @param translucent the cinematic shelf's band: the artwork and the glow show through it.
@@ -46,19 +66,63 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
      * @param bandAll     with singleRow, the band runs behind every app in the row (dock_band_all).
      */
     DockDecoration(int dockSize, float density, boolean translucent, boolean names, int opacity, boolean lightGlass,
-                   boolean evenPadding, boolean bandVisible, boolean singleRow, boolean bandAll) {
+                   boolean evenPadding, boolean bandVisible, boolean singleRow, boolean bandAll, boolean rimOnly) {
         this.dockSize = dockSize;
         this.singleRow = singleRow;
         this.bandAll = singleRow && bandAll;
+        this.rimOnly = rimOnly;
         this.density = density;
-        this.namesRoom = names ? 22 * density : 0;
+        this.namesRoom = names ? 34 * density : 0;
         this.lightGlass = lightGlass;
         this.evenPadding = evenPadding;
         this.bandVisible = bandVisible;
+        this.translucent = translucent;
+        glassPaint.setAlpha(Math.round(Math.max(0, Math.min(100, opacity)) * 2.55f));
         band.setColor(translucent ? 0x8C121014 : (Math.round(opacity * 2.55f) << 24) | 0x141416);
         edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(density);
-        edge.setColor(lightGlass ? 0x38FFFFFF : translucent ? 0x26FFFFFF : 0x1FFFFFFF);
+        edge.setColor(0x33000000);
+        rim.setStyle(Paint.Style.STROKE);
+        rim.setStrokeWidth(1.35f * density);
+        rim.setColor(0x33000000);
+    }
+
+    void setListener(Listener listener) {
+        this.listener = listener;
+    }
+
+    /** Dock settings: change the band's opacity without rebuilding Home. */
+    void setOpacity(int opacity) {
+        int percent = Math.max(0, Math.min(100, opacity));
+        glassPaint.setAlpha(Math.round(percent * 2.55f));
+        if (rimOnly) return;
+        band.setShader(null);
+        band.setColor(translucent ? 0x8C121014 : (Math.round(percent * 2.55f) << 24) | 0x141416);
+        // The light-glass shader is only rebuilt when these move; without this the flat colour above
+        // stays after an opacity change because the band rect did not move.
+        shaderTop = Float.NaN;
+        shaderBottom = Float.NaN;
+    }
+
+    void setGlass(Bitmap bitmap, RectF rect, float radius) {
+        glass = bitmap;
+        glassRect.set(rect);
+        glassRadius = radius;
+    }
+
+    void clearGlass() {
+        glass = null;
+    }
+
+    /** Extra band height under the tiles for their names, in px (0 when names are hidden). */
+    float namesRoomPx() {
+        return namesRoom;
+    }
+
+    /** Forces the next draw to report the band again, so a new wallpaper can be baked. */
+    void refreshBand() {
+        reported.setEmpty();
+        reportedRadius = -1f;
     }
 
     /** Concentric corners: the band's radius is the tiles' radius plus the band's padding around them. */
@@ -80,8 +144,8 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
                                @NonNull RecyclerView.State state) {
         int pos = parent.getChildAdapterPosition(view);
         if (pos >= 0 && (singleRow || pos < dockSize)) {
-            outRect.top = (int) (6 * density);
-            outRect.bottom = (int) (12 * density);
+            outRect.top = (int) (9 * density);
+            outRect.bottom = (int) (15 * density);
         }
     }
 
@@ -97,7 +161,8 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             RecyclerView.ViewHolder vh = parent.getChildViewHolder(child);
             View card = vh instanceof AppAdapter.Holder ? ((AppAdapter.Holder) vh).card : child.findViewById(R.id.card);
             if (card == null) continue;
-            float l = child.getLeft() + card.getLeft();
+            // Reorder glides move tiles with translationX; the band must follow the carried tile.
+            float l = child.getLeft() + child.getTranslationX() + card.getLeft();
             float t = child.getTop() + card.getTop() + child.getTranslationY();
             float r = l + card.getWidth();
             float b = t + card.getHeight();
@@ -110,7 +175,7 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             }
         }
         if (!any) return;
-        float pad = 14 * density;
+        float pad = 17 * density;
         // The band can only draw inside the grid, and the first and last dock tiles sit 12dp in from its
         // edges: a full 14dp at the sides sliced the rounded ends flat (#454). Keep the sides, with the
         // 1dp edge line, inside the grid; the top and bottom have room.
@@ -139,6 +204,26 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             rect.right = Math.min(rect.right, parent.getWidth() - density);
         }
         rect.bottom += namesRoom;
+        reportBand(parent, radius);
+        if (rimOnly) {
+            // At 100 % there is no white outline: a very faint dark tint keeps the name strip
+            // grouped without drawing a stripe across the wallpaper.
+            band.setShader(null);
+            band.setColor(0x22000000);
+            c.drawRoundRect(rect, radius, radius, band);
+            return;
+        }
+        // Keep drawing the last bake while the band scrolls; a stale offset is far less visible than
+        // the flat fallback, and MainActivity debounces the next bake until scrolling stops.
+        boolean baked = glass != null && Math.abs(glassRadius - radius) < 0.5f;
+        if (baked) {
+            c.drawBitmap(glass, null, rect, glassPaint);
+            // The clock capsule's finish: a top sheen and a brighter edge on top of the bake.
+            shine.setShader(new LinearGradient(0, rect.top, 0, rect.top + rect.height() * 0.34f,
+                    0x4AFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            c.drawRoundRect(rect, radius, radius, shine);
+            return;
+        }
         if (lightGlass && (rect.top != shaderTop || rect.bottom != shaderBottom)) {
             // The pills' glass (pill_bg: white, 18% fading to 8%), a little fainter over this much larger area.
             band.setShader(new LinearGradient(0, rect.top, 0, rect.bottom, 0x24FFFFFF, 0x0DFFFFFF,
@@ -148,5 +233,21 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         }
         c.drawRoundRect(rect, radius, radius, band);
         c.drawRoundRect(rect, radius, radius, edge);
+
+    }
+
+    private void reportBand(RecyclerView parent, float radius) {
+        if (listener == null) return;
+        if (reported.equals(rect) && Math.abs(reportedRadius - radius) < 0.5f) return;
+        reported.set(rect);
+        reportedRadius = radius;
+        int[] location = new int[2];
+        parent.getLocationOnScreen(location);
+        Rect screen = new Rect(
+                Math.round(location[0] + rect.left),
+                Math.round(location[1] + rect.top),
+                Math.round(location[0] + rect.right),
+                Math.round(location[1] + rect.bottom));
+        listener.onBand(screen, radius);
     }
 }

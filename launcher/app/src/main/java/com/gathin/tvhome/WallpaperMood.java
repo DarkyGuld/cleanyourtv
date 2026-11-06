@@ -43,7 +43,14 @@ final class WallpaperMood {
         } catch (NumberFormatException ignored) {
             // not a number: the defaults
         }
-        return times != null ? times : new int[]{DEFAULT_SUNRISE, DEFAULT_SUNSET};
+        if (times != null) {
+            // Extreme longitude/timezone combinations can put the sun outside the day; Sky rejects
+            // those, but the mood comparison would otherwise make NIGHT unreachable.
+            int rise = ((times[0] % 1440) + 1440) % 1440;
+            int set = ((times[1] % 1440) + 1440) % 1440;
+            if (rise < set) return new int[]{rise, set};
+        }
+        return new int[]{DEFAULT_SUNRISE, DEFAULT_SUNSET};
     }
 
     /** The pictures in the mood's group, in the collection's order; all of them when the group has none. */

@@ -120,7 +120,7 @@ public final class BatFlightView extends View {
             c.translate(x, y);
             c.scale(mirror[i] ? -1f : 1f, sy);
             dst.set(-s / 2f, -s / 2f, s / 2f, s / 2f);
-            c.drawBitmap(bat, null, dst, paint);
+            if (bat != null) c.drawBitmap(bat, null, dst, paint);
             c.restore();
         }
         postInvalidateOnAnimation();

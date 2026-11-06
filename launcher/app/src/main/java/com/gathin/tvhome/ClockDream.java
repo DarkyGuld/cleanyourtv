@@ -19,7 +19,23 @@ public class ClockDream extends DreamService {
         setContentView(R.layout.dream_clock);
         ClockFormat.apply(getWindow().getDecorView(), Config.load(this).clockFormat);
         scene = new ClockScene(getWindow().getDecorView());
+        // Start with the wallpaper/glow at once; the media session is read off the main thread.
         scene.useHomeWallpaper(this);
+        scene.loadMediaArt(this, media -> {
+            if (media == null || media.bitmap == null) return;
+            scene.useMediaArt(media.bitmap);
+            android.widget.TextView mediaTitle = findViewById(R.id.dreamMediaTitle);
+            if (mediaTitle != null) {
+                String text = media.title == null ? "" : media.title;
+                if (media.artist != null && !media.artist.trim().isEmpty()) {
+                    text += (text.isEmpty() ? "" : "  ·  ") + media.artist;
+                }
+                if (!text.trim().isEmpty()) {
+                    mediaTitle.setText(text);
+                    mediaTitle.setVisibility(android.view.View.VISIBLE);
+                }
+            }
+        });
     }
 
     @Override
@@ -36,7 +52,7 @@ public class ClockDream extends DreamService {
 
     @Override
     public void onDetachedFromWindow() {
-        if (scene != null) scene.stop();
+        if (scene != null) scene.close();
         super.onDetachedFromWindow();
     }
 }

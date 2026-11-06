@@ -7,6 +7,13 @@
     android:clipChildren="false"
     android:clipToPadding="false">
 
+    <com.gathin.tvhome.FocusGlowView
+        android:id="@+id/focusGlow"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:importantForAccessibility="no" />
+
     <FrameLayout
         android:id="@+id/card"
         android:layout_width="180dp"
@@ -47,6 +54,27 @@
             android:textSize="13sp"
             android:fontFamily="@string/font_body"
             android:visibility="gone" />
+
+        <com.gathin.tvhome.GlassTileView
+            android:id="@+id/glassOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            android:importantForAccessibility="no" />
+
+        <com.gathin.tvhome.FocusGlossView
+            android:id="@+id/focusGloss"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:alpha="1"
+            android:importantForAccessibility="no" />
+
+        <com.gathin.tvhome.FocusRingView
+            android:id="@+id/focusRing"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:alpha="0"
+            android:importantForAccessibility="no" />
     </FrameLayout>
 
     <TextView

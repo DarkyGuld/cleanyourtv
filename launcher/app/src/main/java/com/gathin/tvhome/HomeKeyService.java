@@ -57,6 +57,13 @@ public class HomeKeyService extends AccessibilityService {
     private int[] settingsScancodes = new int[0];
     private int[] settingsKeycodes = new int[0];
     private boolean settingsPanel;
+    /** control_center, cached with the rest of the config: the first bind may be locked, before any read of it. */
+    private boolean controlCenter;
+    /** Tap Settings for TV settings, hold it for the launcher's own settings. */
+    private static final long SETTINGS_HOLD_MS = 400;
+    private long settingsDownAt = -1;
+    private boolean settingsHoldFired;
+    private final Runnable settingsHold = this::openLauncherSettings;
     /** consume_volume_keys: Volume Up/Down go to VolumeKeys instead of on to the firmware. */
     private boolean consumeVolumeKeys;
     /** app_keys, the same maps InputKeyService reads, for setups that run only this service. */
@@ -182,7 +189,18 @@ public class HomeKeyService extends AccessibilityService {
         GuardKeep.stepOut(this);
     }
 
+    /** Launcher settings changed: pick them up without waiting for Android to rebind this helper. */
+    static void reloadConfig() {
+        HomeKeyService service = running;
+        if (service != null) service.loadConfig(false);
+    }
+
     private void loadConfig() {
+        loadConfig(true);
+    }
+
+    /** @param initial true on the first bind after boot; a settings reload must not run the boot probe again. */
+    private void loadConfig(boolean initial) {
         // Keycodes and the panel choice can also come from a theme; theme.sh restarts this service.
         Config config = Config.load(this);
         // restore_key_services: note that this helper runs, so Home can put it back after a force stop. Here, not
@@ -191,6 +209,9 @@ public class HomeKeyService extends AccessibilityService {
         if (repairRecord) ServiceRepair.connected(this, getClass());
         settingsKeycodes = config.settingsKeycodes;
         settingsPanel = config.settingsKeyPanel;
+        // Read here, after the unlock, and never from onKeyEvent: the service is directBootAware and can be
+        // handing over keys while the user is locked, when the credential-protected prefs throw.
+        controlCenter = Config.controlCenter(this);
         consumeVolumeKeys = config.consumeVolumeKeys;
         appKeys = RemoteKeys.parseAppKeys(config.appKeys);
         appScancodes = RemoteKeys.parseAppScancodes(config.appKeys);
@@ -227,7 +248,7 @@ public class HomeKeyService extends AccessibilityService {
             info.eventTypes |= AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
             setServiceInfo(info);
         }
-        if (!stockHome.isEmpty() || !powerOnLiveTv.isEmpty()) probeAtBoot();
+        if (initial && (!stockHome.isEmpty() || !powerOnLiveTv.isEmpty())) probeAtBoot();
         armStandbyExit();
         holdAppKeys = RemoteKeys.parseHoldAppKeys(config.appKeys);
         holdAppScancodes = RemoteKeys.parseHoldAppScancodes(config.appKeys);
@@ -254,6 +275,18 @@ public class HomeKeyService extends AccessibilityService {
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
+        // Cached from the last config read (reloadConfig refreshes it), so a key on the lock screen never
+        // touches credential-protected storage.
+        if (event.getKeyCode() == KeyEvent.KEYCODE_MENU && event.getAction() == KeyEvent.ACTION_UP
+                && controlCenter) {
+            Intent panel = new Intent(this, QuickSettingsActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(panel);
+                return true;
+            } catch (RuntimeException ignored) {
+            }
+        }
         // power_on_home: the first key after power-on hands the TV to the user (power and wake keys don't count).
         if (powerOnUntil != 0 && event.getAction() == KeyEvent.ACTION_DOWN
                 && event.getKeyCode() != KeyEvent.KEYCODE_POWER && event.getKeyCode() != KeyEvent.KEYCODE_WAKEUP) {
@@ -264,8 +297,27 @@ public class HomeKeyService extends AccessibilityService {
         if (RemoteKeys.handle(this, event, inFront(appScancodes, frontAppScancodes, event.getScanCode()),
                 holdAppScancodes.get(event.getScanCode()))) return true;
         // The stock launcher handled the remote's Settings button; with it disabled the button does nothing.
+        // A tap opens TV settings; holding the same button opens the launcher's own settings.
         if (isSettingsKey(event)) {
-            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) {
+                    settingsHoldFired = false;
+                    settingsDownAt = event.getDownTime();
+                    handler.removeCallbacks(settingsHold);
+                    handler.postDelayed(settingsHold, SETTINGS_HOLD_MS);
+                } else if (!settingsHoldFired && settingsDownAt >= 0
+                        && event.getEventTime() - settingsDownAt >= SETTINGS_HOLD_MS) {
+                    openLauncherSettings();
+                }
+                return true;
+            }
+            handler.removeCallbacks(settingsHold);
+            settingsDownAt = -1;
+            if (settingsHoldFired) {
+                settingsHoldFired = false;
+                return true;
+            }
+            if (!event.isCanceled()) {
                 Intent open = settingsPanel ? new Intent(this, QuickSettingsActivity.class)
                         : SystemSettings.intent(this, Settings.ACTION_SETTINGS);
                 try {
@@ -357,6 +409,11 @@ public class HomeKeyService extends AccessibilityService {
     }
 
     /** The settings menu offers Restart only while this helper is bound: it opens the system power menu. */
+    /** True while Android has this accessibility helper bound; Menu over apps needs it. */
+    static boolean isRunning() {
+        return running != null;
+    }
+
     static boolean canOpenPowerMenu() {
         return running != null;
     }
@@ -412,6 +469,18 @@ public class HomeKeyService extends AccessibilityService {
 
     static boolean isShortPress(long downTime, long upTime, long longPressTimeout) {
         return upTime - downTime < longPressTimeout;
+    }
+
+    private void openLauncherSettings() {
+        if (settingsDownAt < 0 || settingsHoldFired) return;
+        settingsHoldFired = true;
+        Intent open = new Intent(this, LauncherSettingsActivity.class);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(open);
+        } catch (ActivityNotFoundException | SecurityException unavailable) {
+            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void openHome() {

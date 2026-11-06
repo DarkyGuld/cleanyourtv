@@ -14,7 +14,6 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -44,6 +43,423 @@ final class Config {
     static final String WALLPAPER_CHOICE_KEY = "wallpaper_choice";
     static final String DOCK_OPACITY_KEY = "dock_opacity";
     static final String CLOCK_FORMAT_KEY = "clock_format";
+    static final String LIQUID_GLASS_KEY = "liquid_glass";
+    static final String CLOCK_STYLE_KEY = "clock_style";
+    static final String GLASS_TRANSPARENCY_KEY = "glass_transparency";
+    static final String ICON_PACK_KEY = "icon_pack";
+    static final String ICON_GLOW_KEY = "icon_glow";
+    static final int ICON_GLOW_DEFAULT = 40;
+    static final String TOP_BAR_CAPSULE_KEY = "top_bar_capsule";
+    static final String DOCK_GAP_KEY = "dock_gap";
+    static final String DOCK_BOTTOM_KEY = "dock_bottom";
+    static final String SHELF_SHADOW_KEY = "shelf_shadow";
+    static final String HERO_TITLE_KEY = "hero_title";
+    static final String TILE_BORDER_KEY = "tile_border";
+    static final String GLASS_MOTION_KEY = "glass_motion";
+    static final String FOCUS_MOTION_KEY = "focus_motion";
+    static final String FOCUS_GLOSS_KEY = "focus_gloss";
+    static final String EDIT_JIGGLE_KEY = "edit_jiggle";
+    static final String PARALLAX_KEY = "parallax";
+    static final String TOP_SHELF_KEY = "top_shelf";
+    static final String TOP_SHELF_PROGRESS_KEY = "top_shelf_progress";
+    static final String TOP_SHELF_AUTO_HIDE_KEY = "top_shelf_auto_hide";
+    static final String TOP_SHELF_SOURCES_KEY = "top_shelf_sources";
+    static final String TOP_SHELF_NOW_PLAYING_KEY = "top_shelf_now_playing";
+    static final String TOP_SHELF_ALL_SOURCES = "*";
+    static final String MEDIA_BACKGROUND_KEY = "media_background";
+    static final String LIVING_WALLPAPER_KEY = "living_wallpaper";
+    static final String NOW_PLAYING_FULL_KEY = "now_playing_full";
+    static final String SMART_STACK_KEY = "smart_stack";
+    static final String SMART_STACK_SECONDS_KEY = "smart_stack_seconds";
+    static final String CONTROL_CENTER_KEY = "control_center";
+    static final String APP_NAMES_KEY = "app_names";
+    static final String SCREENSAVER_MEDIA_KEY = "screensaver_media";
+    static final String AMBIENT_MODE_KEY = "ambient_mode";
+    static final String NP_WAVEFORM_KEY = "np_waveform";
+    static final String NP_TIMES_KEY = "np_times";
+    static final String NP_ALBUM_ART_KEY = "np_album_art";
+    static final String NP_SOURCE_KEY = "np_source";
+    static final String NP_CLOSE_KEY = "np_close";
+    static final String NP_VISUAL_MODE_KEY = "np_visual_mode";
+    static final String NP_BG_STYLE_KEY = "np_bg_style";
+    static final String NP_BG_OPACITY_KEY = "np_bg_opacity";
+    static final String NP_ACCENT_KEY = "np_accent";
+    static final String NP_GLOW_KEY = "np_glow";
+    private static final String NP_DESIGN_V2_KEY = "np_design_v2";
+    private static final String NP_DESIGN_V3_KEY = "np_design_v3";
+    private static final String NP_DESIGN_V4_KEY = "np_design_v4";
+    private static final String NP_DESIGN_V5_KEY = "np_design_v5";
+    static final String NP_SIZE_KEY = "np_size";
+    /** Default 40 % see-through: the same glass strength as before, now adjustable. */
+    static final int GLASS_TRANSPARENCY_DEFAULT = 15;
+
+    /** Every preference a theme push or an explicit reset clears; SETTINGS_REVISION_KEY stays. */
+    private static final Set<String> LOCAL_CHOICE_KEYS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "columns", ROWS_BELOW_DOCK_KEY, "animations", "advanced_effects",
+            WALLPAPER_CHOICE_KEY, DOCK_OPACITY_KEY, CLOCK_FORMAT_KEY, OpenOnStart.KEY,
+            CLOCK_STYLE_KEY, LIQUID_GLASS_KEY, GLASS_TRANSPARENCY_KEY, ICON_PACK_KEY,
+            ICON_GLOW_KEY, GLASS_MOTION_KEY, PARALLAX_KEY, TOP_SHELF_KEY,
+            TOP_SHELF_PROGRESS_KEY, TOP_SHELF_AUTO_HIDE_KEY, TOP_SHELF_SOURCES_KEY,
+            TOP_SHELF_NOW_PLAYING_KEY, LIVING_WALLPAPER_KEY, NOW_PLAYING_FULL_KEY,
+            APP_NAMES_KEY, SMART_STACK_KEY, SMART_STACK_SECONDS_KEY, CONTROL_CENTER_KEY,
+            MEDIA_BACKGROUND_KEY, SCREENSAVER_MEDIA_KEY, FOCUS_MOTION_KEY, FOCUS_GLOSS_KEY,
+            EDIT_JIGGLE_KEY, TOP_BAR_CAPSULE_KEY, DOCK_GAP_KEY, DOCK_BOTTOM_KEY,
+            SHELF_SHADOW_KEY, HERO_TITLE_KEY, TILE_BORDER_KEY, AMBIENT_MODE_KEY,
+            NP_WAVEFORM_KEY, NP_TIMES_KEY, NP_ALBUM_ART_KEY, NP_SOURCE_KEY, NP_CLOSE_KEY,
+            NP_VISUAL_MODE_KEY, NP_BG_STYLE_KEY, NP_BG_OPACITY_KEY, NP_ACCENT_KEY,
+            NP_GLOW_KEY, NP_SIZE_KEY, "np_source_text", "np_visualizer", "np_bar_variant",
+            "np_prev", "np_next", "ambient_now_playing", "ambient_idle_minutes",
+            "screensaver_previous")));
+
+    static Set<String> localChoiceKeys() {
+        return LOCAL_CHOICE_KEYS;
+    }
+
+    static boolean hasLocalChoices(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE);
+        for (String key : LOCAL_CHOICE_KEYS) if (prefs.contains(key)) return true;
+        return IconChoices.globalStyle(ctx) != IconChoices.ORIGINAL || IconChoices.hasPerAppChoices(ctx);
+    }
+
+    /** Back to the theme's values: the owner's on-TV picks and per-app icon styles. */
+    static void clearLocalChoices(Context ctx) {
+        SharedPreferences.Editor editor =
+                ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE).edit();
+        for (String key : LOCAL_CHOICE_KEYS) editor.remove(key);
+        // Mark the music-bar migration done; otherwise Home re-adds the default NP keys on the next
+        // start and Follow theme looks enabled again right after a reset.
+        editor.putBoolean(NP_DESIGN_V5_KEY, true);
+        editor.apply();
+        IconChoices.clearAll(ctx);
+    }
+
+    private static void clearChoiceKeys(SharedPreferences.Editor editor) {
+        for (String key : LOCAL_CHOICE_KEYS) editor.remove(key);
+        editor.putBoolean(NP_DESIGN_V5_KEY, true);
+    }
+
+    /** iOS-style Liquid Glass surfaces; on by default, switchable in Launcher settings. */
+    static boolean liquidGlass(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(LIQUID_GLASS_KEY, true);
+    }
+
+    /** How much of the wallpaper shows through the glass, 0..100 %. */
+    static int glassTransparency(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(GLASS_TRANSPARENCY_KEY, GLASS_TRANSPARENCY_DEFAULT);
+        return Math.max(0, Math.min(100, value));
+    }
+
+    /**
+     * Baked-glass opacity for the current transparency setting. The curve is perceptual rather than
+     * linear: 90 % and 95 % still keep a visible glass edge and interior instead of looking identical.
+     * 100 % remains fully transparent.
+     */
+    static float glassOpacity(Context ctx) {
+        int transparency = glassTransparency(ctx);
+        if (transparency >= 100) return 0f;
+        double opacity = Math.sqrt(1f - transparency / 100f);
+        // Keep 95 % clearly lighter than 90 %: above 90 the surface fades out faster, while
+        // 100 % still means no fixed glass at all.
+        if (transparency > 90) opacity *= (100 - transparency) / 10.0;
+        return (float) opacity;
+    }
+
+    /** 100 %: the glass surface disappears completely; only the content stays. */
+    static boolean glassFullyTransparent(Context ctx) {
+        return glassTransparency(ctx) >= 100;
+    }
+
+    /** Package name of the installed icon pack, or "" for the launcher's own art. */
+    static String iconPack(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getString(ICON_PACK_KEY, "");
+    }
+
+    /** Strength of the focus shadow around an app icon, 0..100. */
+    static int iconGlow(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(ICON_GLOW_KEY, ICON_GLOW_DEFAULT);
+        return Math.max(0, Math.min(100, value));
+    }
+
+    /** One glass capsule behind the four top-bar buttons instead of four separate pills. */
+    static boolean topBarCapsule(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(TOP_BAR_CAPSULE_KEY, true);
+    }
+
+    /** Extra air between the Now Playing bar and the dock, 0/8/16/24 dp. */
+    static int dockGap(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(DOCK_GAP_KEY, 8);
+        return Math.max(0, Math.min(32, value));
+    }
+
+    /** Space under the dock band in dp (0-96): lets the floating dock sit as low or high as the owner wants. */
+    static int dockBottom(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(DOCK_BOTTOM_KEY, 8);
+        return Math.max(0, Math.min(96, value));
+    }
+
+    /** A soft shadow under the icons when the dock band is hidden at 100 % transparency. */
+    static boolean shelfShadow(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(SHELF_SHADOW_KEY, true);
+    }
+
+    /** 0 = large dock app name, 1 = small, 2 = hidden. */
+    static int heroTitle(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(HERO_TITLE_KEY, 1);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** Optional 1 px resting border on every app tile; off unless the owner asks for it. */
+    static boolean tileBorder(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(TILE_BORDER_KEY, false);
+    }
+
+    /** Use the current media artwork in the clock screensaver. */
+    static boolean screensaverMedia(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(SCREENSAVER_MEDIA_KEY, false);
+    }
+
+    /** 0 = still, 1 = slow drift, 2 = quicker drift: local wallpapers move and fade like Aura. */
+    static int livingWallpaper(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(LIVING_WALLPAPER_KEY, 0);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** One rotating Continue Watching card instead of the three-card shelf (Aura's Smart Stack). */
+    static boolean smartStack(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(SMART_STACK_KEY, false);
+    }
+
+    /** Seconds a Smart Stack card stays before the next one. */
+    static int smartStackSeconds(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(SMART_STACK_SECONDS_KEY, 8);
+        return value < 5 ? 5 : Math.min(30, value);
+    }
+
+    /** 0 = under the focused tile, 1 = always, 2 = never. */
+    static int appNames(Context ctx, boolean configAlways) {
+        int fallback = configAlways ? 1 : 0;
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(APP_NAMES_KEY, fallback);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** The remote's Menu button opens the Control Center panel. */
+    static boolean controlCenter(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(CONTROL_CENTER_KEY, false);
+    }
+
+    /** Long-press the Now Playing bar to open the full-screen player. */
+    static boolean nowPlayingFull(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NOW_PLAYING_FULL_KEY, true);
+    }
+
+    /** Use the current media artwork as a dimmed Home background. */
+    static boolean mediaBackground(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(MEDIA_BACKGROUND_KEY, false);
+    }
+
+    /** A hairline progress bar along the bottom of each Continue Watching card. */
+    static boolean topShelfProgress(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(TOP_SHELF_PROGRESS_KEY, true);
+    }
+
+    /** Apps allowed in the Continue Watching shelf; ["*"] means every app. */
+    static java.util.Set<String> topShelfSources(Context ctx) {
+        java.util.Set<String> value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getStringSet(TOP_SHELF_SOURCES_KEY, java.util.Collections.singleton(TOP_SHELF_ALL_SOURCES));
+        return value == null || value.isEmpty() ? java.util.Collections.emptySet()
+                : new java.util.HashSet<>(value);
+    }
+
+    static boolean topShelfSourceAllowed(Context ctx, String pkg) {
+        java.util.Set<String> sources = topShelfSources(ctx);
+        return sources.contains(TOP_SHELF_ALL_SOURCES) || sources.contains(pkg);
+    }
+
+    /** Show the active media session for the focused app when Watch Next has no row for it. */
+    static boolean topShelfNowPlaying(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(TOP_SHELF_NOW_PLAYING_KEY, true);
+    }
+
+    /** Hide the Continue Watching shelf after ten idle seconds; focusing another app brings it back. */
+    static boolean topShelfAutoHide(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(TOP_SHELF_AUTO_HIDE_KEY, true);
+    }
+
+    /** 0 = off, 1 = Continue Watching shelf while a dock app is focused, 2 = always if there is content. */
+    static int topShelf(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(TOP_SHELF_KEY, 1);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** 0 = still wallpaper, 1 = subtle Aura-style focus parallax, 2 = full. */
+    static int parallax(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(PARALLAX_KEY, 1);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** The Edit front row mode makes every tile jiggle, like GlassOS. */
+    static boolean editJiggle(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(EDIT_JIGGLE_KEY, true);
+    }
+
+    /** 0 = off, 1 = subtle, 2 = full: the glassy glare sweeping over the focused tile. */
+    static int focusGloss(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(FOCUS_GLOSS_KEY, 1);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** 0 = standard focus fades, 1 = Lumen-style interruptible focus springs. */
+    static int focusMotion(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(FOCUS_MOTION_KEY, 1);
+        return Math.max(0, Math.min(1, value));
+    }
+
+    /** 0 = off, 1 = subtle, 2 = full: how much the focus glass reacts to spring motion. */
+    static int glassMotion(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(GLASS_MOTION_KEY, 1);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** 0 = app-coloured ambient glow, 1 = calm neutral, 2 = off. */
+    static int ambientMode(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(AMBIENT_MODE_KEY, 1);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** One-time migration to the compact redesigned bar: all parts on, source badge on the cover. */
+    static void ensureMusicBarDefaults(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE);
+        if (prefs.getBoolean(NP_DESIGN_V5_KEY, false)) return;
+        // One clean reset for the redesigned bar. After this the owner's switches are respected.
+        prefs.edit()
+                .putInt(NP_VISUAL_MODE_KEY, 1)
+                .putInt(NP_BG_STYLE_KEY, 1)
+                .putInt(NP_BG_OPACITY_KEY, 75)
+                .putInt(NP_ACCENT_KEY, 0)
+                .putBoolean(NP_GLOW_KEY, true)
+                .putBoolean(NP_WAVEFORM_KEY, true)
+                .putBoolean(NP_TIMES_KEY, true)
+                .putBoolean(NP_ALBUM_ART_KEY, true)
+                .putBoolean(NP_SOURCE_KEY, true)
+                .putBoolean(NP_CLOSE_KEY, true)
+                .putBoolean(NOW_PLAYING_FULL_KEY, true)
+                .putBoolean(NP_DESIGN_V2_KEY, true)
+                .putInt(NP_SIZE_KEY, 1)
+                .putBoolean(NP_DESIGN_V3_KEY, true)
+                .putBoolean(NP_DESIGN_V4_KEY, true)
+                .putBoolean(NP_DESIGN_V5_KEY, true)
+                .apply();
+    }
+
+    /** The waveform progress row in the Now Playing bar. */
+    static boolean npWaveform(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_WAVEFORM_KEY, true);
+    }
+
+    /** The elapsed and total time labels beside the waveform. */
+    static boolean npTimes(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_TIMES_KEY, true);
+    }
+
+    /** The album cover on the left of the Now Playing bar. */
+    static boolean npAlbumArt(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_ALBUM_ART_KEY, true);
+    }
+
+    /** The source app badge under the artist. Off by default: the new bar is cleaner without it. */
+    static boolean npSource(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_SOURCE_KEY, true);
+    }
+
+    /** 0 = compact, 1 = balanced, 2 = roomy, 3 = large. */
+    static int npBarSize(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_SIZE_KEY, 1);
+        return Math.max(0, Math.min(3, value));
+    }
+
+    /** 0 Off, 1 Waves, 2 Oscilloscope, 3 Radial Aura, 4 Pulse/orb, 5 Minimal. */
+    static int npVisualMode(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_VISUAL_MODE_KEY, 1);
+        return Math.max(0, Math.min(5, value));
+    }
+
+    /** 0 transparent, 1 glass, 2 solid. */
+    static int npBackgroundStyle(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_BG_STYLE_KEY, 1);
+        return Math.max(0, Math.min(2, value));
+    }
+
+    /** Background opacity 0..100. */
+    static int npBackgroundOpacity(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_BG_OPACITY_KEY, 75);
+        return Math.max(0, Math.min(100, value));
+    }
+
+    /** 0 white, 1 green, 2 cyan, 3 amber. */
+    static int npAccentIndex(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_ACCENT_KEY, 0);
+        return Math.max(0, Math.min(3, value));
+    }
+
+    static int npAccentColor(Context ctx) {
+        int[] colors = {0xFFFFFFFF, 0xFF22C55E, 0xFF06B6D4, 0xFFF59E0B};
+        return colors[npAccentIndex(ctx)];
+    }
+
+    static boolean npGlow(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_GLOW_KEY, true);
+    }
+
+    /** The always-visible X in the Now Playing bar. Back still closes the bar when it has focus. */
+    static boolean npClose(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_CLOSE_KEY, true);
+    }
+
+    /** "standard" is the plain header; "hitech" wraps the clock in a Liquid Glass card. */
+    static String clockStyle(Context ctx) {
+        String style = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getString(CLOCK_STYLE_KEY, "standard");
+        return "hitech".equals(style) ? "hitech" : "standard";
+    }
     /**
      * Counts the changes made in Launcher settings. Home remembers the count it was built with and rebuilds on
      * resume when it differs, however the settings were left (see MainActivity#onResume).
@@ -542,7 +958,8 @@ final class Config {
         File dir = dir(ctx);
         File file = dir != null ? new File(dir, FILE_NAME) : null;
         boolean mounted = Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState());
-        JSONObject json = readOverlay(ctx, file, mounted);
+        Overlay overlay = readOverlay(ctx, file, mounted);
+        JSONObject json = overlay.json;
         if (json != null) {
             applied = true;
             dock = stringList(json, "dock_apps", dock);
@@ -658,8 +1075,11 @@ final class Config {
         // A theme push or reset invalidates choices made on the TV. On first use, remember the
         // current theme without clearing choices from an older launcher version.
         SharedPreferences choices = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE);
-        // Unmounted storage looks like a theme reset; compare only once the file is readable.
-        if (mounted) syncThemeChoices(choices, dir, file);
+        // Unmounted storage looks like a theme reset; compare only once the card is mounted.
+        if (mounted && dir != null && syncThemeChoices(choices, dir, overlay.present, overlay.valid)) {
+            // A theme push/reset also drops per-app icon picks, which live in their own prefs file.
+            IconChoices.clearAll(ctx);
+        }
         int chosenColumns = choices.getInt("columns", columns);
         if (chosenColumns >= 4 && chosenColumns <= 7) columns = chosenColumns;
         int chosenRows = choices.getInt(ROWS_BELOW_DOCK_KEY, rowsBelow);
@@ -748,24 +1168,40 @@ final class Config {
         return races;
     }
 
-    private static void syncThemeChoices(SharedPreferences choices, File dir, File config) {
-        File revision = dir == null ? null : new File(dir, THEME_REVISION_NAME);
-        String token = revisionToken(revision);
-        String signature = fileStamp(config) + ":" + token;
+    private static boolean syncThemeChoices(SharedPreferences choices, File dir,
+                                            boolean present, boolean valid) {
+        // A present but unreadable file is a failed push or a failing card, not a reset.
+        if (present && !valid) return false;
+        String token = revisionToken(dir == null ? null : new File(dir, THEME_REVISION_NAME));
+        if (TOKEN_UNREADABLE.equals(token)) return false;
+        String signature = (present ? "present:" : "absent:") + token;
         String seen = choices.getString(THEME_SIGNATURE_KEY, null);
+        SharedPreferences.Editor editor = choices.edit();
         if (seen == null) {
             // Existing preferences survive an app upgrade, unless the first launch follows an
             // explicit theme push or reset by the updated tools.
-            SharedPreferences.Editor editor = choices.edit();
-            if (!"absent".equals(token)) editor.remove("columns").remove("animations")
-                    .remove("advanced_effects").remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY)
-                    .remove(DOCK_OPACITY_KEY).remove(CLOCK_FORMAT_KEY);
+            boolean reset = !TOKEN_ABSENT.equals(token);
+            if (reset) clearChoiceKeys(editor);
             editor.putString(THEME_SIGNATURE_KEY, signature).commit();
-        } else if (!seen.equals(signature)) {
-            choices.edit().remove("columns").remove("animations").remove("advanced_effects")
-                    .remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY).remove(DOCK_OPACITY_KEY)
-                    .remove(CLOCK_FORMAT_KEY).putString(THEME_SIGNATURE_KEY, signature).commit();
+            return reset;
         }
+        // Only an explicit revision token change or a confirmed delete resets the owner's
+        // choices; a re-pushed config.json with the same token keeps them.
+        boolean reset = (!present && seenPresent(seen)) || !token.equals(seenToken(seen));
+        if (reset) clearChoiceKeys(editor);
+        if (!signature.equals(seen)) editor.putString(THEME_SIGNATURE_KEY, signature);
+        if (reset || !signature.equals(seen)) editor.commit();
+        return reset;
+    }
+
+    private static String seenToken(String signature) {
+        int colon = signature.lastIndexOf(':');
+        return colon >= 0 ? signature.substring(colon + 1) : signature;
+    }
+
+    /** Old signatures were "length@time:token", with a literal "absent" stamp when the file was missing. */
+    private static boolean seenPresent(String signature) {
+        return !signature.startsWith("absent:");
     }
 
     /** The dock band opacity chosen in Launcher settings, or the theme's when none (or an out-of-range one) is saved. */
@@ -773,48 +1209,86 @@ final class Config {
         return chosen >= 30 && chosen <= 100 ? chosen : theme;
     }
 
-    private static String fileStamp(File file) {
-        return file != null && file.isFile() ? file.length() + "@" + file.lastModified() : "absent";
-    }
+    private static final String TOKEN_ABSENT = "absent";
+    private static final String TOKEN_UNREADABLE = "unreadable";
 
     private static String revisionToken(File file) {
-        if (file == null || !file.isFile() || file.length() > 64) return "absent";
+        if (file == null || !file.exists()) return TOKEN_ABSENT;
+        if (!file.isFile() || file.length() > 64) return TOKEN_UNREADABLE;
         try (InputStream in = new FileInputStream(file)) {
             byte[] bytes = new byte[(int) file.length()];
             int n = in.read(bytes);
-            return n > 0 ? new String(bytes, 0, n, StandardCharsets.US_ASCII) : "absent";
+            return n > 0 ? new String(bytes, 0, n, StandardCharsets.US_ASCII) : TOKEN_UNREADABLE;
         } catch (Exception ignored) {
-            return "absent";
+            // A failed read is not evidence of a new theme.
+            return TOKEN_UNREADABLE;
         }
     }
 
-    /** Reads and parses the overlay; any problem means "no overlay", never a crash on the home screen. */
     /**
      * The overlay, or before external storage is mounted, the copy kept from the last time it was read. Home can
      * start before the card is mounted (seen at every boot on a Xiaomi MiTV-MTEQ0), and without the copy it comes
-     * up with the built-in dock order. A missing file on mounted storage still means no overlay.
+     * up with the built-in dock order. A missing file on mounted storage still means no overlay; a present but
+     * unreadable one keeps the last good copy and leaves the theme choices alone.
      */
-    private static JSONObject readOverlay(Context ctx, File file, boolean mounted) {
+    private static Overlay readOverlay(Context ctx, File file, boolean mounted) {
         File copy = new File(ctx.getFilesDir(), FILE_NAME);
-        if (!mounted) return read(copy);
-        JSONObject json = read(file);
-        if (json == null) {
-            copy.delete();
-        } else {
-            try (FileOutputStream out = new FileOutputStream(copy)) {
-                out.write(json.toString().getBytes(StandardCharsets.UTF_8));
-            } catch (IOException e) {
-                Log.w(TAG, "could not keep a copy of " + file + ": " + e.getMessage());
-            }
+        if (!mounted) {
+            Overlay cached = read(copy);
+            return new Overlay(false, false, cached.json);
         }
-        return json;
+        Overlay overlay = read(file);
+        if (!overlay.present) {
+            copy.delete();
+            new File(copy.getPath() + ".tmp").delete();
+            return overlay;
+        }
+        if (!overlay.valid) {
+            // Half-written push, bad card or locked file: keep the last good theme and its signature.
+            return new Overlay(true, false, read(copy).json);
+        }
+        writeCopy(copy, overlay.json);
+        return overlay;
     }
 
-    private static JSONObject read(File file) {
-        if (file == null || !file.isFile()) return null;
+    /** The copy is replaced atomically too: a kill mid-write must not lose the last good theme. */
+    private static void writeCopy(File copy, JSONObject json) {
+        File temp = new File(copy.getPath() + ".tmp");
+        try (FileOutputStream out = new FileOutputStream(temp)) {
+            out.write(json.toString().getBytes(StandardCharsets.UTF_8));
+            out.getFD().sync();
+        } catch (Exception e) {
+            temp.delete();
+            Log.w(TAG, "could not keep a copy of " + copy + ": " + e.getMessage());
+            return;
+        }
+        if (!temp.renameTo(copy)) {
+            temp.delete();
+            Log.w(TAG, "could not replace " + copy);
+        }
+    }
+
+    /** The overlay as found: present says the external file exists, valid that it parsed as an object. */
+    private static final class Overlay {
+        final boolean present;
+        final boolean valid;
+        final JSONObject json;
+        Overlay(boolean present, boolean valid, JSONObject json) {
+            this.present = present;
+            this.valid = valid;
+            this.json = json;
+        }
+    }
+
+    private static Overlay read(File file) {
+        if (file == null || !file.exists()) return new Overlay(false, false, null);
+        if (!file.isFile()) {
+            warnOnce(file, "not a file");
+            return new Overlay(true, false, null);
+        }
         if (file.length() > 64 * 1024) {
-            Log.w(TAG, "ignoring " + file + ": larger than 64 KB");
-            return null;
+            warnOnce(file, "larger than 64 KB");
+            return new Overlay(true, false, null);
         }
         try (InputStream in = new FileInputStream(file)) {
             byte[] buf = new byte[(int) file.length()];
@@ -822,11 +1296,21 @@ final class Config {
             while (n < buf.length && (r = in.read(buf, n, buf.length - n)) > 0) n += r;
             String text = new String(buf, 0, n, StandardCharsets.UTF_8);
             if (text.startsWith("\uFEFF")) text = text.substring(1);   // Windows editors add a BOM
-            return new JSONObject(text);
+            return new Overlay(true, true, new JSONObject(text));
         } catch (Exception e) {
-            Log.w(TAG, "ignoring " + file + ": " + e.getMessage());
-            return null;
+            warnOnce(file, e.getMessage());
+            return new Overlay(true, false, null);
         }
+    }
+
+    private static volatile String warnedOverlay;
+
+    /** One log per version of the file: Config.load runs on every menu, not on every bad parse. */
+    private static void warnOnce(File file, String reason) {
+        String stamp = file.getPath() + "@" + file.length() + "@" + file.lastModified();
+        if (stamp.equals(warnedOverlay)) return;
+        warnedOverlay = stamp;
+        Log.w(TAG, "ignoring " + file + ": " + reason);
     }
 
     /** wallpaper_moods as JSON text (config.xml); empty or unreadable is no groups. */

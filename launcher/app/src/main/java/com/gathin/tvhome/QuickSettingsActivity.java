@@ -28,6 +28,8 @@ public final class QuickSettingsActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         setContentView(R.layout.activity_quick_settings);
+        Glass.panel(this, findViewById(R.id.panel));
+        GlassBackground.apply(this, findViewById(R.id.panel), 24);
         if (getResources().getBoolean(R.bool.rtl_menu_bar)) {
             View panel = findViewById(R.id.panel);
             android.widget.FrameLayout.LayoutParams position =
@@ -43,6 +45,9 @@ public final class QuickSettingsActivity extends Activity {
         addRow(rows, R.drawable.ic_settings, R.string.tv_settings, 0, SystemSettings.intent(this, Settings.ACTION_SETTINGS));
         addRow(rows, R.drawable.ic_picture, R.string.quick_picture, 0, SystemSettings.intent(this, Settings.ACTION_DISPLAY_SETTINGS));
         addRow(rows, R.drawable.ic_wifi, R.string.quick_network, 0, SystemSettings.intent(this, Settings.ACTION_WIFI_SETTINGS));
+        addRow(rows, R.drawable.ic_wifi, R.string.quick_bluetooth, 0, SystemSettings.intent(this, Settings.ACTION_BLUETOOTH_SETTINGS));
+        addRow(rows, R.drawable.ic_input, R.string.quick_inputs, 0,
+                new Intent(this, MainActivity.class).setAction(MainActivity.ACTION_VIEW_INPUTS));
         addRow(rows, R.drawable.ic_apps, R.string.quick_apps, R.string.quick_apps_hint,
                 SystemSettings.intent(this, Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS));
         // Through Home, so it rebuilds with the new choices when Launcher settings closes.

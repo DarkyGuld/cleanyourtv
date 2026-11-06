@@ -112,17 +112,24 @@ final class RemoteKeys {
     }
 
     /**
-     * Applies the key_filter choice (config.xml or a theme): when false the service drops
-     * FLAG_REQUEST_FILTER_KEY_EVENTS at runtime, so it stays enabled for nothing but stops filtering.
-     * Some firmware (TCL Google TV on Android 12) drops key auto-repeat once ANY service filters keys:
-     * long-pressing volume then steps once per press. Filtering can only be skipped while the service
-     * runs, since the flag is also declared in the manifest metadata.
+     * Applies the key_filter choice (config.xml or a theme): when false the service clears
+     * FLAG_REQUEST_FILTER_KEY_EVENTS at runtime, so it stays enabled for nothing but stops filtering;
+     * when true it sets the flag again, so a helper that ran with the filter off starts filtering again
+     * without a reboot. Some firmware (TCL Google TV on Android 12) drops key auto-repeat once ANY
+     * service filters keys: long-pressing volume then steps once per press. Filtering can only be
+     * skipped while the service runs, since the flag is also declared in the manifest metadata.
+     *
+     * <p>The info is read and written on every call: Android keeps the last setServiceInfo() flags, so a
+     * cached copy from before a settings change would either miss the clear or re-add it by mistake.
      */
     static void applyKeyFilter(AccessibilityService service, boolean keyFilter) {
-        if (keyFilter) return;
         AccessibilityServiceInfo info = service.getServiceInfo();
         if (info == null) return;
-        info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        if (keyFilter) {
+            info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        } else {
+            info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        }
         service.setServiceInfo(info);
     }
 

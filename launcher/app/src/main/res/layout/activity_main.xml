@@ -215,6 +215,10 @@
                         android:textSize="52sp"
                         android:fontFamily="@string/font_light"
                         android:letterSpacing="-0.04"
+                        android:shadowColor="#66000000"
+                        android:shadowDx="0"
+                        android:shadowDy="2"
+                        android:shadowRadius="6"
                         android:includeFontPadding="false" />
 
                     <TextClock
@@ -403,6 +407,15 @@
                 android:descendantFocusability="afterDescendants" />
         </FrameLayout>
     </LinearLayout>
+
+    <!-- Covers the tops of any next grid row and grounds the icon row like a shelf shadow. -->
+    <View
+        android:id="@+id/bottomFade"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bottom_fade"
+        android:importantForAccessibility="no" />
 
     <!-- The single floating glass highlight that springs between tiles. -->
     <com.gathin.tvhome.GlassView

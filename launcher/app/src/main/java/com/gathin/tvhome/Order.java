@@ -67,6 +67,10 @@ final class Order {
     static Order decode(String text) {
         if (text == null) return null;
         String[] lines = text.split("\n", -1);
+        // Accept a file saved with Windows line endings: the "\r" is line punctuation, not a key.
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].endsWith("\r")) lines[i] = lines[i].substring(0, lines[i].length() - 1);
+        }
         if (lines.length < 2 || !lines[0].equals(MAGIC) || !lines[1].startsWith(DOCK)) return null;
         int docked = -1, first = 2;
         if (lines.length > 2 && lines[2].startsWith(DOCKED)) {

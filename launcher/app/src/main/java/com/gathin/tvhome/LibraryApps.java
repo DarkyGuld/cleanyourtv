@@ -69,12 +69,29 @@ final class LibraryApps {
             return false;
         }
         if (onHome) {
+            boolean wasAdded = additions.contains(pkg);
             if (!write(store(context, false), additions, pkg, true)) return false;
-            return !removed.contains(pkg) || write(store(context, true), removed, pkg, false);
+            if (removed.contains(pkg) && !write(store(context, true), removed, pkg, false)) {
+                // The explicit removal would still win in visible(), so the shortcut is not on Home
+                // after all: undo the addition rather than leaving the two files contradicting each
+                // other and reporting a success the caller cannot see.
+                if (!write(store(context, false), additions, pkg, wasAdded)) {
+                    Log.w("TvHome.Library", "Could not roll back shortcut addition");
+                }
+                return false;
+            }
+            return true;
         }
         // The removal takes precedence over theme defaults and any previous explicit addition.
+        boolean wasRemoved = removed.contains(pkg);
         if (!write(store(context, true), removed, pkg, true)) return false;
-        if (additions.contains(pkg)) write(store(context, false), additions, pkg, false);
+        if (additions.contains(pkg) && !write(store(context, false), additions, pkg, false)) {
+            // The removed file alone already hides the shortcut, so the request is in effect. Still,
+            // try to restore the previous state so a false result and the files agree; if that too
+            // fails, the removal stays in effect and success is the honest answer.
+            if (write(store(context, true), removed, pkg, wasRemoved)) return false;
+            Log.w("TvHome.Library", "Shortcut hidden, but its old addition could not be cleared");
+        }
         return true;
     }
 
@@ -188,7 +205,10 @@ final class LibraryApps {
         for (int i = 0; i <= text.length(); i++) {
             if (i < text.length() && text.charAt(i) != '\n') continue;
             if (i == start && i == text.length()) break;
-            String pkg = text.substring(start, i);
+            // Read lines as "\n" only, but drop the "\r" a Windows editor leaves before each one.
+            int end = i;
+            if (end > start && text.charAt(end - 1) == '\r') end -= 1;
+            String pkg = text.substring(start, end);
             if (!validPackage(pkg) || !result.add(pkg) || result.size() > MAX_ADDED)
                 throw new IllegalArgumentException("Invalid shortcut file");
             start = i + 1;

@@ -1,6 +1,7 @@
 package com.gathin.tvhome;
 
 import android.Manifest;
+import android.accessibilityservice.AccessibilityService;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -48,8 +49,19 @@ final class ServiceRepair {
                 }
             }
             List<ComponentName> recorded = new ArrayList<>();
+            List<String> stale = new ArrayList<>();
             for (String service : prefs(context).getAll().keySet()) {
-                recorded.add(new ComponentName(context.getPackageName(), service));
+                ComponentName helper = recordedHelper(context, service);
+                if (helper == null) stale.add(service);
+                else recorded.add(helper);
+            }
+            // A record for a helper this APK no longer has (renamed or dropped) must not be replayed: the
+            // component would never bind, and the add/remove/add below would run on every start. Drop the
+            // record itself, so it is not looked at again.
+            if (!stale.isEmpty()) {
+                SharedPreferences.Editor editor = prefs(context).edit();
+                for (String service : stale) editor.remove(service);
+                editor.apply();
             }
             if (recorded.isEmpty()) return;
             // The list without our recorded helpers, then with all of them.
@@ -91,6 +103,22 @@ final class ServiceRepair {
             }, "ServiceRepair").start();
         } catch (RuntimeException ignored) {
             // The setting is the system's; a refusal leaves the helper off, as before.
+        }
+    }
+
+    /** The recorded helper as a component of this APK, or null when its class or service declaration is gone. */
+    private static ComponentName recordedHelper(Context context, String service) {
+        if (service == null || service.isEmpty()) return null;
+        try {
+            ComponentName name = new ComponentName(context.getPackageName(), service);
+            // The current APK still declares this service under exactly that class name.
+            if (!service.equals(context.getPackageManager().getServiceInfo(name, 0).name)) return null;
+            // And the class itself is still in the APK, as one of this app's accessibility helpers.
+            Class<?> cls = Class.forName(service, false, context.getClassLoader());
+            return AccessibilityService.class.isAssignableFrom(cls) ? name : null;
+        } catch (PackageManager.NameNotFoundException | ClassNotFoundException | LinkageError
+                 | RuntimeException gone) {
+            return null;
         }
     }
 

@@ -3,6 +3,8 @@ package com.gathin.tvhome;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
@@ -27,35 +29,41 @@ final class SystemSettings {
         // projector, rk3566, Android 14): open its main screen directly. Not a vendor entry, so the Settings
         // menu's "Native settings" row stays as it was.
         Intent aosp = new Intent().setComponent(AOSP_TV_SETTINGS);
-        try {
-            pm.getPackageInfo(AOSP_TV_SETTINGS.getPackageName(), 0);
-            return aosp;
-        } catch (PackageManager.NameNotFoundException e) {
-            return standard;
-        }
+        if (usable(pm, AOSP_TV_SETTINGS)) return aosp;
+        return standard;
     }
 
     private static final ComponentName AOSP_TV_SETTINGS =
             new ComponentName("com.android.tv.settings", "com.android.tv.settings.MainSettings");
 
-    /** The first vendor settings entry from settings_fallback_components that is installed, or null
-     *  when none is. China-market firmware keeps pages the AOSP TV settings has no row for -
-     *  Xiaomi's Account & Security, where the ADB switch lives - in the vendor's own settings app;
-     *  MainActivity's Settings menu offers it as "Native settings" while one is installed. */
+    /** The first vendor settings entry from settings_fallback_components that is installed and whose
+     *  activity is enabled and exported, or null when none is. China-market firmware keeps pages the
+     *  AOSP TV settings has no row for - Xiaomi's Account & Security, where the ADB switch lives - in
+     *  the vendor's own settings app; MainActivity's Settings menu offers it as "Native settings" while
+     *  one is available. */
     static Intent vendorIntent(Context context) {
         PackageManager pm = context.getPackageManager();
         for (String value : context.getResources().getStringArray(R.array.settings_fallback_components)) {
             ComponentName component = ComponentName.unflattenFromString(value);
             if (component == null) continue;
-            // Explicit resolveActivity() always succeeds, so check the package exists instead.
-            try {
-                pm.getPackageInfo(component.getPackageName(), 0);
-            } catch (PackageManager.NameNotFoundException e) {
-                continue;
-            }
+            // An entry can name an activity that was renamed, disabled or never exported by a later
+            // firmware; skipping it lets the next entry (and the caller's other fallbacks) run.
+            if (!usable(pm, component)) continue;
             return new Intent().setComponent(component);
         }
         return null;
+    }
+
+    /** True when the component exists, its app and activity are enabled, and it can be launched. */
+    private static boolean usable(PackageManager pm, ComponentName component) {
+        try {
+            ActivityInfo activity = pm.getActivityInfo(component, 0);
+            if (!activity.enabled || !activity.exported) return false;
+            ApplicationInfo app = activity.applicationInfo;
+            return app == null || app.enabled;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** The TV's App info page for pkg, or null where the firmware has none (CVTE's settings app, #1202). */

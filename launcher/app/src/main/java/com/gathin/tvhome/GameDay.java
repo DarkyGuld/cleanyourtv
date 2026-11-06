@@ -86,19 +86,25 @@ final class GameDay {
         read();
     }
 
+    private volatile boolean closed;
+    private int generation;
+
     /** Home is off screen: nothing runs until it is back. */
     void stop() {
         if (watching) ctx.getContentResolver().unregisterContentObserver(observer);
         watching = false;
+        generation++;   // an in-flight query must not update detached views
     }
 
     void shutdown() {
+        closed = true;
         stop();
         io.shutdownNow();
     }
 
     /** One query off the main thread (the provider lives in the add-on's process), then onChange on the main thread. */
     void read() {
+        final int request = ++generation;
         try {
             io.execute(() -> {
                 List<Object[]> rows = new ArrayList<>();
@@ -114,6 +120,7 @@ final class GameDay {
                 List<Turn> parsed = fromRows(rows);
                 int seconds = turnSeconds(rows);
                 main.post(() -> {
+                    if (closed || request != generation) return;
                     turns = parsed;
                     turnSeconds = seconds;
                     onChange.run();

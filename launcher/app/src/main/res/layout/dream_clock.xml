@@ -20,12 +20,14 @@
         android:orientation="vertical">
 
         <LinearLayout
+            android:id="@+id/dreamTimeRow"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:baselineAligned="true">
 
             <TextClock
+                android:id="@+id/dreamTime"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:format12Hour="h:mm"
@@ -37,6 +39,7 @@
                 android:includeFontPadding="false" />
 
             <TextClock
+                android:id="@+id/dreamAmPm"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
@@ -50,6 +53,7 @@
         </LinearLayout>
 
         <TextClock
+            android:id="@+id/dreamDate"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
@@ -61,5 +65,19 @@
             android:fontFamily="@string/font_regular"
             android:letterSpacing="0.14"
             android:textAllCaps="true" />
+
+        <TextView
+            android:id="@+id/dreamMediaTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:layout_marginTop="12dp"
+            android:maxWidth="820dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#CCFFFFFF"
+            android:textSize="15sp"
+            android:fontFamily="@string/font_medium"
+            android:visibility="gone" />
     </LinearLayout>
 </FrameLayout>

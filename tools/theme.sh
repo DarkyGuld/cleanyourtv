@@ -111,9 +111,11 @@ del() { echo "rm -f $DIR/$1 2>/dev/null; content delete --uri $URI/$1 2>/dev/nul
 # itself, and an on-TV pick of one of its pictures is read back from it (WallpaperRotation.chosen), so a reset
 # that left the pictures behind still shows the theme it just removed. Both paths use this one string.
 CLEAR_WALLPAPERS="rm -f $DIR/wallpapers/*.[jJ][pP][gG] $DIR/wallpapers/*.[jJ][pP][eE][gG] $DIR/wallpapers/*.[pP][nN][gG] $DIR/wallpapers/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/wallpapers 2>/dev/null"
+# icons/<package>.webp/png/jpg are optional per-app tile artwork; a push replaces the whole folder.
+CLEAR_ICONS="rm -f $DIR/icons/*.[jJ][pP][gG] $DIR/icons/*.[jJ][pP][eE][gG] $DIR/icons/*.[pP][nN][gG] $DIR/icons/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/icons 2>/dev/null"
 
 if [ "${1:-}" = --reset ]; then
-  tv "mkdir -p $DIR 2>/dev/null; $(del config.json); $(del wallpaper.jpg); $(del wallpapers/captions.txt); $CLEAR_WALLPAPERS; printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
+  tv "mkdir -p $DIR 2>/dev/null; $(del config.json); $(del wallpaper.jpg); $(del wallpapers/captions.txt); $CLEAR_WALLPAPERS; $CLEAR_ICONS; printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
   "$PY" -I theme_restart.py
   echo reset
   exit 0
@@ -167,6 +169,22 @@ if [ -d "$THEME/wallpapers" ]; then
     esac
   done
 fi
+ICON_NAMES=""
+if [ -d "$THEME/icons" ]; then
+  for IMAGE in "$THEME"/icons/*; do
+    [ -f "$IMAGE" ] || continue
+    case "$IMAGE" in
+      *.[jJ][pP][gG]|*.[jJ][pP][eE][gG]|*.[pP][nN][gG]|*.[wW][eE][bB][pP])
+        NAME=$(basename "$IMAGE")
+        if [[ ! "$NAME" =~ ^[A-Za-z0-9_.-]+$ || "$NAME" == *..* ]]; then
+          echo "unsupported icon filename: $NAME (b64push.py takes letters, digits, '.', '_' and '-', with no" \
+            "'..' in the name). Nothing was sent to the TV." >&2
+          exit 2
+        fi
+        ICON_NAMES="$ICON_NAMES $NAME" ;;
+    esac
+  done
+fi
 
 tv "mkdir -p $DIR" >/dev/null 2>&1 || true
 tv --push "$THEME/config.json" "$TMP-config.json" >/dev/null
@@ -189,6 +207,11 @@ if [ -f "$THEME/wallpapers/captions.txt" ]; then
 else
   tv "$(del wallpapers/captions.txt)" >/dev/null
 fi
+tv "$CLEAR_ICONS" >/dev/null
+for NAME in $ICON_NAMES; do
+  "$PY" -I b64push.py "$THEME/icons/$NAME" "$(stage "icons/$NAME")"
+  tv "$(put "icons/$NAME")" >/dev/null
+done
 tv "printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
 "$PY" -I theme_restart.py
 echo applied

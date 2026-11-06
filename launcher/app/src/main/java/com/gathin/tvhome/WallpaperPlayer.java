@@ -33,6 +33,14 @@ import java.util.concurrent.Executors;
 final class WallpaperPlayer {
     private final FrameLayout root;
     private final ImageView image;
+    private final ImageView fade;
+    private final ImageView media;
+    private final int living;
+    private android.animation.ValueAnimator livingAnim;
+    private long lastLivingFrame;
+    /** Focus parallax added on top of the living pan instead of replacing it. */
+    private float parallaxX, parallaxY, parallaxScale = 1f;
+    private float parallaxTargetX, parallaxTargetY, parallaxTargetScale = 1f;
     private final int backgroundColor;
     private final List<File> files;
     private final long interval;
@@ -40,6 +48,12 @@ final class WallpaperPlayer {
     private final SharedPreferences preferences;
     private final ExecutorService decoder = Executors.newSingleThreadExecutor();
     private final Random random = new Random();
+    /** Told after a new picture is on screen, so the baked glass can be refreshed. */
+    interface Listener {
+        void onWallpaperChanged();
+    }
+
+    private Listener listener;
     private final int width;
     /** config wallpaper_true_color: ARGB_8888 instead of RGB_565. */
     private final Bitmap.Config bitmapConfig;
@@ -51,6 +65,8 @@ final class WallpaperPlayer {
     private boolean active;
     private boolean closed;
     private boolean loading;
+    private int showGeneration;
+    private int mediaGeneration;
     private String displayed = "";
     /** wallpaper_captions: the shown picture's name from wallpapers/captions.txt; null when off or there are none. */
     private final TextView caption;
@@ -85,17 +101,34 @@ final class WallpaperPlayer {
         DisplayMetrics metrics = context.getResources().getDisplayMetrics();
         width = metrics.widthPixels;
         height = metrics.heightPixels;
+        living = Config.livingWallpaper(context);
         image = new ImageView(context);
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        fade = living > 0 ? new ImageView(context) : null;
+        if (fade != null) {
+            fade.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            fade.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            fade.setAlpha(0f);
+        }
+        media = new ImageView(context);
+        media.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        media.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        media.setAlpha(0f);
+        media.setColorFilter(new android.graphics.PorterDuffColorFilter(0x99101419, android.graphics.PorterDuff.Mode.SRC_OVER));
         names = config.wallpaperCaptions && config.wallpaperEnabled && !files.isEmpty()
                 ? WallpaperCaptions.read(files.get(0).getParentFile()) : Collections.emptyMap();
         caption = names.isEmpty() ? null : makeCaption(context, root);
         if (config.wallpaperEnabled && !files.isEmpty()) {
             root.addView(image, 0, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            if (fade != null) root.addView(fade, 1, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             showFirst();
         }
+        root.addView(media, Math.min(fade == null ? 1 : 2, root.getChildCount()),
+                new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     /**
@@ -120,6 +153,7 @@ final class WallpaperPlayer {
                     preferences.edit().putString("image", displayed)
                             .putLong("changed", System.currentTimeMillis()).apply();
                 }
+                notifyWallpaperChanged();
                 return;
             }
             files.remove(first);   // unreadable or over 4K: try another, or keep the plain colour
@@ -128,19 +162,132 @@ final class WallpaperPlayer {
         }
     }
 
+    void setListener(Listener listener) {
+        this.listener = listener;
+    }
+
+    /** Aura-style full-screen focus motion: a slow, subtle counter-move of the photograph. */
+    void focus(float normalizedX, float normalizedY, boolean animate) {
+        if (image.getDrawable() == null) return;
+        float dx = -Math.max(-1f, Math.min(1f, normalizedX)) * 10f * image.getResources().getDisplayMetrics().density;
+        float dy = -Math.max(-1f, Math.min(1f, normalizedY)) * 6f * image.getResources().getDisplayMetrics().density;
+        if (living > 0) {
+            // Keep the living pan running; the parallax becomes a small offset on top of it. Stopping the
+            // animator here made "Living wallpaper" look broken whenever a tile had focus.
+            parallaxTargetX = dx;
+            parallaxTargetY = dy;
+            parallaxTargetScale = 1.02f;
+            return;
+        }
+        stopLiving();
+        image.animate().cancel();
+        if (!animate) {
+            image.setTranslationX(dx);
+            image.setTranslationY(dy);
+            image.setScaleX(1.02f);
+            image.setScaleY(1.02f);
+        } else {
+            image.animate().translationX(dx).translationY(dy).scaleX(1.02f).scaleY(1.02f)
+                    .setDuration(620).setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f)).start();
+        }
+    }
+
+    /** Stops the parallax when focus leaves the tiles. */
+    void resetFocus(boolean animate) {
+        if (image.getDrawable() == null) return;
+        if (living > 0) {
+            parallaxTargetX = 0f;
+            parallaxTargetY = 0f;
+            parallaxTargetScale = 1f;
+            return;
+        }
+        image.animate().cancel();
+        if (!animate) {
+            image.setTranslationX(0f);
+            image.setTranslationY(0f);
+            image.setScaleX(1f);
+            image.setScaleY(1f);
+            startLiving();
+        } else {
+            image.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f)
+                    .setDuration(520).setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
+                    .withEndAction(this::startLiving).start();
+        }
+    }
+
+    /** Aura's living photograph: a slow pan and zoom that keeps the still wallpaper breathing. */
+    private void startLiving() {
+        // active is false while Home is being built behind Launcher settings: do not animate there until
+        // onResume's start() says Home is really in front again.
+        if (!active || living <= 0 || current == null || image.getDrawable() == null) return;
+        stopLiving();
+        float density = image.getResources().getDisplayMetrics().density;
+        livingAnim = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        livingAnim.setDuration(living == 2 ? 18_000L : 32_000L);
+        livingAnim.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        livingAnim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        livingAnim.setInterpolator(new android.view.animation.LinearInterpolator());
+        livingAnim.addUpdateListener(a -> {
+            // The pan is extremely slow (18-32 s each way), so 35 fps is visually identical to 60 and halves the
+            // number of full-screen wallpaper rescales the TV's GPU has to composite.
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastLivingFrame < 28) return;
+            lastLivingFrame = now;
+            // Ease the focus offset on top of the slow pan; a separate 620 ms view animation would fight this one.
+            parallaxX += (parallaxTargetX - parallaxX) * 0.16f;
+            parallaxY += (parallaxTargetY - parallaxY) * 0.16f;
+            parallaxScale += (parallaxTargetScale - parallaxScale) * 0.16f;
+            float f = (float) a.getAnimatedValue();
+            float zoom = living == 2 ? 0.065f : 0.038f;
+            float dx = (f - 0.5f) * (living == 2 ? 18f : 10f) * density;
+            float dy = (f - 0.5f) * (living == 2 ? 10f : 6f) * density;
+            float scale = (1f + zoom * 0.55f + zoom * f * 0.45f) * parallaxScale;
+            image.setScaleX(scale);
+            image.setScaleY(scale);
+            image.setTranslationX(dx + parallaxX);
+            image.setTranslationY(dy + parallaxY);
+        });
+        livingAnim.start();
+    }
+
+    private void stopLiving() {
+        if (livingAnim != null) {
+            livingAnim.cancel();
+            livingAnim = null;
+        }
+    }
+
     void start() {
         active = true;
         update();
+        // Resume the slow pan without restarting it: a paused ValueAnimator keeps its phase and costs no frames.
+        if (living > 0) {
+            if (livingAnim != null && livingAnim.isPaused()) livingAnim.resume();
+            else if (livingAnim == null) startLiving();
+        }
     }
 
     void stop() {
         active = false;
+        // Home is behind an app or the settings overlay: a full-screen transform at 60 fps here would keep the
+        // whole TV busy for a wallpaper nobody can see. Pause, don't cancel, so returning to Home is seamless.
+        if (livingAnim != null && livingAnim.isRunning()) livingAnim.pause();
     }
 
     /** Drops the wallpaper texture when Home is hidden and Android asks the process to free memory. */
     void releaseForMemoryPressure() {
-        if (current == null) return;
+        stopLiving();
+        mediaGeneration++;
+        media.animate().cancel();
+        media.setImageDrawable(null);
+        media.setAlpha(0f);
+        showGeneration++;
         image.setImageDrawable(null);
+        if (fade != null) {
+            fade.animate().cancel();
+            fade.setImageDrawable(null);
+            fade.setAlpha(0f);
+        }
         // The renderer may still have a queued frame that references this hardware bitmap. Drop our references and
         // let Android reclaim its native buffer after rendering releases it instead of recycling it mid-frame.
         current = null;
@@ -159,9 +306,41 @@ final class WallpaperPlayer {
         return WallpaperMood.select(files, moods, WallpaperMood.timeOfDay(now.getHour() * 60 + now.getMinute(), sun[0], sun[1]));
     }
 
+    /** Glassio-style media backdrop: the current album or title artwork, dimmed behind Home. */
+    void setMediaArt(Bitmap bitmap) {
+        final int generation = ++mediaGeneration;
+        media.animate().cancel();
+        if (bitmap == null) {
+            fadeMediaDrawable(generation);
+            return;
+        }
+        media.setImageBitmap(bitmap);
+        media.setAlpha(0f);
+        media.animate().alpha(1f).setDuration(420).start();
+    }
+
+    void clearMediaArt() {
+        final int generation = ++mediaGeneration;
+        media.animate().cancel();
+        fadeMediaDrawable(generation);
+    }
+
+    private void fadeMediaDrawable(int generation) {
+        media.animate().alpha(0f).setDuration(260).withEndAction(() -> {
+            if (generation == mediaGeneration) media.setImageDrawable(null);
+        }).start();
+    }
+
     void close() {
         active = false;
         closed = true;
+        showGeneration++;
+        mediaGeneration++;
+        stopLiving();
+        image.animate().cancel();
+        if (fade != null) fade.animate().cancel();
+        media.animate().cancel();
+        if (caption != null) caption.animate().cancel();
         decoder.shutdownNow();
     }
 
@@ -178,29 +357,38 @@ final class WallpaperPlayer {
         if (selected == null || selected.getName().equals(displayed)) return;
         File next = selected;
         loading = true;
-        decoder.execute(() -> {
-            Bitmap bitmap = decode(next);
-            root.post(() -> {
-                loading = false;
-                if (closed || !active) {
-                    if (bitmap != null) bitmap.recycle();
-                    return;
-                }
-                if (bitmap == null) {
-                    files.remove(next);
-                    Log.w("TvHome.Wallpaper", "Skipping unreadable image: " + next.getName());
-                    update();
-                    return;
-                }
-                show(bitmap);
-                displayed = next.getName();
-                showCaption(true);
-                if (!displayed.equals(previous) || changed == 0) {
-                    preferences.edit().putString("image", displayed)
-                            .putLong("changed", System.currentTimeMillis()).apply();
-                }
+        try {
+            decoder.execute(() -> {
+                Bitmap bitmap = decode(next);
+                root.post(() -> {
+                    loading = false;
+                    if (closed || !active) {
+                        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                        return;
+                    }
+                    if (bitmap == null) {
+                        files.remove(next);
+                        Log.w("TvHome.Wallpaper", "Skipping unreadable image: " + next.getName());
+                        update();
+                        return;
+                    }
+                    show(bitmap);
+                    displayed = next.getName();
+                    showCaption(true);
+                    if (!displayed.equals(previous) || changed == 0) {
+                        preferences.edit().putString("image", displayed)
+                                .putLong("changed", System.currentTimeMillis()).apply();
+                    }
+                    notifyWallpaperChanged();
+                });
             });
-        });
+        } catch (RuntimeException gone) {
+            loading = false;
+        }
+    }
+
+    private void notifyWallpaperChanged() {
+        if (listener != null) listener.onWallpaperChanged();
     }
 
     /**
@@ -263,13 +451,52 @@ final class WallpaperPlayer {
     private void show(Bitmap bitmap) {
         Bitmap old = current;
         current = bitmap;
+        final int generation = ++showGeneration;
         // The wallpaper covers the whole root; avoid drawing the fallback colour under it.
         root.setBackground(null);
-        image.setImageBitmap(bitmap);
-        if (old != null && old != bitmap) image.postDelayed(old::recycle, 500);
+        if (living > 0 && fade != null && old != null && old != bitmap) {
+            stopLiving();
+            fade.animate().cancel();
+            fade.setImageBitmap(bitmap);
+            fade.setAlpha(0f);
+            fade.animate().alpha(1f).setDuration(living == 2 ? 700 : 1100).withEndAction(() -> {
+                if (generation != showGeneration || closed) {
+                    releaseLater(old);
+                    return;
+                }
+                image.setImageBitmap(bitmap);
+                fade.setAlpha(0f);
+                fade.setImageDrawable(null);
+                releaseLater(old);
+                startLiving();
+            }).start();
+        } else {
+            stopLiving();
+            if (fade != null) {
+                fade.animate().cancel();
+                fade.setImageDrawable(null);
+                fade.setAlpha(0f);
+            }
+            image.setImageBitmap(bitmap);
+            releaseLater(old);
+            startLiving();
+        }
+    }
+
+    /**
+     * A replaced hardware bitmap may still be queued in RenderThread. Keep it alive long enough for the next
+     * frames, and never recycle the picture that is current again by then.
+     */
+    private void releaseLater(Bitmap bitmap) {
+        if (bitmap == null || bitmap == current || bitmap.isRecycled()) return;
+        long delay = bitmap.getConfig() == Bitmap.Config.HARDWARE ? 1200L : 500L;
+        root.postDelayed(() -> {
+            if (!bitmap.isRecycled() && bitmap != current) bitmap.recycle();
+        }, delay);
     }
 
     private Bitmap decode(File file) {
+        Bitmap decoded = null;
         try {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inJustDecodeBounds = true;
@@ -288,17 +515,22 @@ final class WallpaperPlayer {
             }
             options.inPreferredConfig = bitmapConfig;
             options.inMutable = dimColor != 0;
-            Bitmap decoded = BitmapFactory.decodeFile(file.getPath(), options);
+            decoded = BitmapFactory.decodeFile(file.getPath(), options);
             if (decoded == null) return null;
             if (dimColor != 0) new Canvas(decoded).drawColor(dimColor);
             // One copy in GPU memory instead of a software bitmap plus its texture; the decode stays off the UI
             // thread for rotations, and Home's return no longer uploads 4-8 MB to the GPU.
             Bitmap gpu = decoded.copy(Bitmap.Config.HARDWARE, false);
-            if (gpu == null) return decoded;
-            decoded.recycle();
+            if (gpu == null || gpu == decoded) {
+                Bitmap result = decoded;
+                decoded = null;
+                return result;
+            }
             return gpu;
         } catch (Exception | OutOfMemoryError failure) {
             return null;
+        } finally {
+            if (decoded != null && !decoded.isRecycled()) decoded.recycle();
         }
     }
 }

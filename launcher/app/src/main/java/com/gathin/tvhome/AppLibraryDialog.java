@@ -3,6 +3,7 @@ package com.gathin.tvhome;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -14,12 +15,18 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.InputType;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -40,6 +47,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -53,6 +61,8 @@ final class AppLibraryDialog {
      * resources, and on a TCL G09 that froze Home for 60-140 ms (2 to 4 janky frames) every time the library opened.
      */
     private static final ExecutorService LOADER = Executors.newSingleThreadExecutor();
+    /** Icons have their own small pool: a fast scroll must not queue in front of the next catalogue. */
+    private static final ExecutorService ICON_LOADER = Executors.newFixedThreadPool(2);
     /** Labels kept between openings (LOADER thread only), until the app is updated. */
     private static final Map<String, Known> KNOWN = new HashMap<>();
 
@@ -72,10 +82,13 @@ final class AppLibraryDialog {
     private final Set<String> iconsLoading = new HashSet<>();
     private final Runnable dismissed;
     private boolean closed;
+    private boolean keyboardShown;
     /** Only the latest load fills the catalogue, and it shows the popup if an opening is waiting. */
     private final LibraryLoads loads = new LibraryLoads();
     private final Activity activity;
     private final Predicate<String> onHome;
+    private final Map<String, String> launchActions;
+    private final boolean cinematic;
     private final Runnable changed;
     private final LinearLayout panel;
     private final boolean reducedMotion;
@@ -85,10 +98,13 @@ final class AppLibraryDialog {
     private final boolean animations;
     private final boolean rtl;
     private TextView instructions;
-    private int totalApps;
+    private TextView count;
+    private EditText search;
     final PopupWindow popup;
     private final float density;
+    private List<ResolveInfo> allApps = new ArrayList<>();
     private List<ResolveInfo> apps = new ArrayList<>();
+    private String query = "";
     private String selectedPackage;
     private int selectedPosition;
     private int selectedOffset;
@@ -155,6 +171,9 @@ final class AppLibraryDialog {
         this.selectionMode = selectionMode;
         this.okOpens = okOpens && !selectionMode;
         this.onHome = onHome;
+        Config config = Config.load(activity);
+        this.launchActions = config.launchActions;
+        this.cinematic = config.cinematicHome;
         this.changed = changed;
         this.dismissed = dismissed;
         this.excludedApps = excludedApps;
@@ -163,11 +182,17 @@ final class AppLibraryDialog {
         panel.setLayoutDirection(rtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(8), dp(12), dp(12));
-        panel.setBackgroundResource(R.drawable.glass_panel);
+        panel.setBackgroundResource(Config.liquidGlass(activity)
+                ? R.drawable.glass_panel_liquid : R.drawable.glass_panel);
+        GlassBackground.apply(activity, panel, 24);
+        if (Config.glassFullyTransparent(activity)) {
+            // GlassBackground clears the background at 100 %; the library still needs a readable scrim.
+            panel.setBackground(surface(0x66000000, 24));
+        }
         View decor = activity.getWindow().getDecorView();
         catalogWidth = Math.min(dp(800), Math.max(dp(200), decor.getWidth() - dp(64)));
         int width = catalogWidth;
-        int height = dp(280);
+        int height = dp(330);
         popup = new PopupWindow(panel, width, height, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
@@ -272,8 +297,22 @@ final class AppLibraryDialog {
     }
 
     private void fill(List<ResolveInfo> catalogue) {
-        totalApps = catalogue.size();
-        apps = catalogue;
+        allApps = new ArrayList<>(catalogue);
+        applyFilter(true);
+    }
+
+    /** Applies the search query to allApps; rebuild re-creates the popup, otherwise only the cards update. */
+    private void applyFilter(boolean rebuild) {
+        String q = query.trim().toLowerCase(Locale.ROOT);
+        List<ResolveInfo> filtered = new ArrayList<>();
+        for (ResolveInfo app : allApps) {
+            if (q.isEmpty()
+                    || label(app).toLowerCase(Locale.ROOT).contains(q)
+                    || app.activityInfo.packageName.toLowerCase(Locale.ROOT).contains(q)) {
+                filtered.add(app);
+            }
+        }
+        apps = filtered;
         Map<String, Boolean> home = new HashMap<>();
         for (ResolveInfo app : apps) {
             String pkg = app.activityInfo.packageName;
@@ -291,7 +330,25 @@ final class AppLibraryDialog {
             int byLabel = collator.compare(label(a), label(b));
             return byLabel != 0 ? byLabel : pa.compareTo(pb);
         });
-        showCatalog();
+        if (rebuild) {
+            showCatalog();
+            return;
+        }
+        selectedPosition = 0;
+        selectedOffset = 0;
+        selectedPackage = apps.isEmpty() ? null : apps.get(0).activityInfo.packageName;
+        if (catalog != null) {
+            catalog.getAdapter().notifyDataSetChanged();
+            catalog.scrollToPosition(0);
+        }
+        if (count != null) {
+            count.setText(activity.getResources().getQuantityString(
+                    R.plurals.library_app_count, apps.size(), apps.size()));
+        }
+        if (instructions != null) {
+            instructions.setText(apps.isEmpty() && !q.isEmpty()
+                    ? activity.getString(R.string.library_no_matches) : hint(false));
+        }
     }
 
     private String label(ResolveInfo app) {
@@ -317,18 +374,45 @@ final class AppLibraryDialog {
         icon.setImageDrawable(cached);
         if (cached != null || !iconsLoading.add(pkg)) return;
         PackageManager pm = activity.getPackageManager();
-        LOADER.execute(() -> {
+        ICON_LOADER.execute(() -> {
+            if (closed) {
+                main.post(() -> iconsLoading.remove(pkg));
+                return;
+            }
             Drawable loaded;
             try { loaded = app.loadIcon(pm); }
             catch (RuntimeException unavailable) { loaded = null; }
-            Drawable result = loaded;
+            Drawable result = loaded != null ? loaded : activity.getDrawable(R.drawable.ic_apps);
+            if (closed) {
+                main.post(() -> iconsLoading.remove(pkg));
+                return;
+            }
+            String iconPack = Config.iconPack(activity);
+            if (!iconPack.isEmpty()) {
+                Drawable packed = IconPacks.icon(activity, iconPack, loadLabel(pm, app), pkg,
+                        app.activityInfo.name);
+                if (packed != null) result = packed;
+            }
+            Drawable shownResult = result;
             main.post(() -> {
                 iconsLoading.remove(pkg);
                 if (closed) return;
-                Drawable shown = result != null ? result : activity.getDrawable(R.drawable.ic_apps);
-                icons.put(pkg, shown);
-                // The view may show another app by now; a view bound to it later takes it from the cache.
-                if (pkg.equals(icon.getTag())) icon.setImageDrawable(shown);
+                icons.put(pkg, shownResult);
+                // A recycled holder may show the same package in another view; rebind that row so
+                // the icon lands where the user is looking, not only on the first bound ImageView.
+                if (pkg.equals(icon.getTag())) icon.setImageDrawable(shownResult);
+                if (catalog != null) {
+                    for (int i = 0; i < apps.size(); i++) {
+                        if (apps.get(i).activityInfo.packageName.equals(pkg)) {
+                            try {
+                                catalog.getAdapter().notifyItemChanged(i);
+                            } catch (RuntimeException busy) {
+                                // A layout pass will pick the cached icon up on its own.
+                            }
+                            break;
+                        }
+                    }
+                }
             });
         });
     }
@@ -348,9 +432,35 @@ final class AppLibraryDialog {
         return activity.getString(home || okOpens ? R.string.library_hint_open : R.string.library_hint_add);
     }
 
+    private void showKeyboard(View view) {
+        keyboardShown = true;
+        view.post(() -> {
+            InputMethodManager imm = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
+    private void hideKeyboard() {
+        keyboardShown = false;
+        if (search == null) return;
+        InputMethodManager imm = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(search.getWindowToken(), 0);
+    }
+
+    private void focusFirstCard() {
+        hideKeyboard();
+        if (catalog == null || apps.isEmpty()) return;
+        catalog.scrollToPosition(0);
+        catalog.post(() -> {
+            if (catalog == null || apps.isEmpty()) return;
+            RecyclerView.ViewHolder holder = catalog.findViewHolderForAdapterPosition(0);
+            if (holder != null) holder.itemView.requestFocus();
+        });
+    }
+
     private void showCatalog() {
         stopHighlight();
-        resize(catalogWidth, dp(280));
+        resize(catalogWidth, dp(330));
         panel.removeAllViews();
         LinearLayout header = new LinearLayout(activity);
         header.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
@@ -361,8 +471,8 @@ final class AppLibraryDialog {
         title.setGravity(Gravity.CENTER_VERTICAL | (rtl ? Gravity.RIGHT : Gravity.LEFT));
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        TextView count = text(activity.getResources().getQuantityString(
-                R.plurals.library_app_count, totalApps, totalApps), 13, 0xA6FFFFFF);
+        count = text(activity.getResources().getQuantityString(
+                R.plurals.library_app_count, apps.size(), apps.size()), 13, 0xA6FFFFFF);
         count.setSingleLine(true);
         header.addView(count, new LinearLayout.LayoutParams(-2, -2));
         // The launcher has no global supportsRtl: explicitly mirror this horizontal row.
@@ -377,12 +487,63 @@ final class AppLibraryDialog {
         instructions.setEllipsize(TextUtils.TruncateAt.END);
         instructions.setPadding(dp(12), 0, dp(12), dp(6));
         panel.addView(instructions, new LinearLayout.LayoutParams(-1, dp(26)));
+        search = new EditText(activity);
+        search.setSingleLine(true);
+        search.setFocusable(true);
+        search.setFocusableInTouchMode(true);
+        search.setHint(R.string.library_search_hint);
+        search.setTextSize(16);
+        search.setTextColor(Color.WHITE);
+        search.setHintTextColor(0x99FFFFFF);
+        search.setTypeface(UiFont.get(activity, R.string.font_medium));
+        search.setInputType(InputType.TYPE_CLASS_TEXT);
+        search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        search.setPadding(dp(14), 0, dp(14), 0);
+        search.setBackground(surface(0x14FFFFFF, 14));
+        search.setText(query);
+        search.setOnClickListener(v -> showKeyboard(search));
+        search.setOnFocusChangeListener((v, focused) -> {
+            search.setBackground(surface(focused ? 0x28FFFFFF : 0x14FFFFFF, 14));
+            if (focused && highlight != null) highlight.setAlpha(0f);
+        });
+        search.setOnKeyListener((v, key, event) -> {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
+                focusFirstCard();
+                return true;
+            }
+            if (key == KeyEvent.KEYCODE_DPAD_UP) return true;
+            if (key == KeyEvent.KEYCODE_BACK) {
+                // First Back clears the query, second hides the keyboard, third closes the library.
+                if (search.length() > 0) {
+                    search.setText("");
+                    return true;
+                }
+                if (keyboardShown) {
+                    hideKeyboard();
+                    return true;
+                }
+                return false;
+            }
+            return false;
+        });
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                String next = s.toString();
+                if (next.equals(query)) return;
+                query = next;
+                applyFilter(false);
+            }
+        });
+        panel.addView(search, new LinearLayout.LayoutParams(-1, dp(40)));
         panel.setFocusableInTouchMode(apps.isEmpty());
         if (apps.isEmpty()) {
-            instructions.setVisibility(View.GONE);
-            heading(activity.getString(R.string.library_empty));
+            heading(activity.getString(query.trim().isEmpty() ? R.string.library_empty : R.string.library_no_matches));
             panel.setFocusableInTouchMode(true);
-            panel.requestFocus();
+            if (!query.trim().isEmpty()) search.requestFocus();
+            else panel.requestFocus();
             return;
         }
         shelf = new FrameLayout(activity);
@@ -457,7 +618,7 @@ final class AppLibraryDialog {
         if (selectionMode) {
             updateSelectionFocus(app, add);
             changed.run();
-            fill(new ArrayList<>(apps));
+            fill(new ArrayList<>(allApps));
             return;
         }
         selectedOffset = 0;
@@ -507,13 +668,21 @@ final class AppLibraryDialog {
 
     private void open(ResolveInfo app) {
         close();
+        String pkg = app.activityInfo.packageName;
         Intent intent = new Intent(Intent.ACTION_MAIN).setComponent(
-                new ComponentName(app.activityInfo.packageName, app.activityInfo.name));
+                new ComponentName(pkg, app.activityInfo.name));
         // TV apps keep the leanback launch intent, so an app already running resumes instead of restarting.
-        if (tvPackages.contains(app.activityInfo.packageName)) intent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        if (tvPackages.contains(pkg)) intent.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        try { activity.startActivity(intent); }
-        catch (ActivityNotFoundException | SecurityException e) {
+        String action = launchActions.get(pkg);
+        if (action != null && LaunchActions.inputId(action) == null) {
+            Intent byAction = LaunchActions.intent(pkg, action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (activity.getPackageManager().resolveActivity(byAction, 0) != null) intent = byAction;
+        }
+        try {
+            activity.startActivity(intent);
+            if (cinematic) LastOpened.record(activity, pkg);
+        } catch (ActivityNotFoundException | SecurityException e) {
             Toast.makeText(activity, activity.getString(R.string.cant_open, label(app)), Toast.LENGTH_SHORT).show();
         }
     }
@@ -524,6 +693,9 @@ final class AppLibraryDialog {
         String pkg = selectedPackage;
         if (spring != null) spring.cancel();
         View menuPanel = activity.getLayoutInflater().inflate(R.layout.popup_inputs, panel, false);
+        Glass.panel(activity, menuPanel);
+        GlassBackground.apply(activity, menuPanel, 24);
+        if (Config.glassFullyTransparent(activity)) menuPanel.setBackground(surface(0x66000000, 24));
         LinearLayout rows = menuPanel.findViewById(R.id.rows);
         PopupWindow menu = new PopupWindow(menuPanel, dp(220), ViewGroup.LayoutParams.WRAP_CONTENT, true);
         actionPopup = menu;
@@ -610,10 +782,10 @@ final class AppLibraryDialog {
     private final class Catalog extends RecyclerView.Adapter<Row> {
         @NonNull @Override public Row onCreateViewHolder(@NonNull ViewGroup parent, int type) {
             FrameLayout row = new FrameLayout(activity);
-            RecyclerView.LayoutParams params = new RecyclerView.LayoutParams(dp(132), dp(170));
+            RecyclerView.LayoutParams params = new RecyclerView.LayoutParams(dp(136), dp(180));
             params.setMargins(dp(6), dp(2), dp(6), dp(2));
             row.setLayoutParams(params);
-            row.setPadding(dp(10), dp(12), dp(10), dp(10));
+            row.setPadding(dp(8), dp(12), dp(8), dp(10));
             row.setFocusableInTouchMode(true);
             row.setClickable(true);
             LinearLayout content = new LinearLayout(activity);
@@ -623,13 +795,13 @@ final class AppLibraryDialog {
             ImageView icon = new ImageView(activity);
             icon.setId(R.id.icon);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            content.addView(icon, new LinearLayout.LayoutParams(dp(60), dp(60)));
+            content.addView(icon, new LinearLayout.LayoutParams(dp(80), dp(80)));
             TextView name = text("", 15, Color.WHITE);
             name.setId(R.id.title);
             name.setGravity(Gravity.CENTER);
             name.setMaxLines(2);
-            LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-1, dp(44));
-            nameParams.topMargin = dp(10);
+            LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-1, dp(38));
+            nameParams.topMargin = dp(8);
             content.addView(name, nameParams);
             TextView status = text("", 11, 0xBBFFFFFF);
             status.setId(R.id.status);
@@ -655,7 +827,7 @@ final class AppLibraryDialog {
             boolean recent = !selectionMode && LibraryApps.recent(installTimes.getOrDefault(pkg, 0L), catalogTime);
             status.setText(home ? R.string.library_on_home : recent ? R.string.library_recent : R.string.library_add_home);
             status.setVisibility(home || !okOpens ? View.VISIBLE : View.INVISIBLE);
-            holder.itemView.setBackground(surface(home ? 0x1475BBA4 : 0x0CFFFFFF, 18));
+            holder.itemView.setBackground(surface(home ? 0x1475BBA4 : 0x0CFFFFFF, 22));
             View check = holder.itemView.findViewById(R.id.dot);
             check.getLayoutParams().width = dp(home ? 18 : 8);
             check.getLayoutParams().height = dp(home ? 18 : 8);
@@ -678,11 +850,15 @@ final class AppLibraryDialog {
                 }
             });
             holder.itemView.setOnKeyListener((v, key, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (key == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (search != null) search.post(search::requestFocus);
+                    return true;
+                }
                 int index = holder.getBindingAdapterPosition();
-                return event.getAction() == KeyEvent.ACTION_DOWN && (key == KeyEvent.KEYCODE_DPAD_UP
-                        || key == KeyEvent.KEYCODE_DPAD_DOWN
+                return key == KeyEvent.KEYCODE_DPAD_DOWN
                         || (rtl ? key == KeyEvent.KEYCODE_DPAD_RIGHT : key == KeyEvent.KEYCODE_DPAD_LEFT) && index == 0
-                        || (rtl ? key == KeyEvent.KEYCODE_DPAD_LEFT : key == KeyEvent.KEYCODE_DPAD_RIGHT) && index == apps.size() - 1);
+                        || (rtl ? key == KeyEvent.KEYCODE_DPAD_LEFT : key == KeyEvent.KEYCODE_DPAD_RIGHT) && index == apps.size() - 1;
             });
         }
         @Override public int getItemCount() { return apps.size(); }

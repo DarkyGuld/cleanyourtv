@@ -40,6 +40,12 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    buildFeatures {
+        // DebugActionsActivity is guarded with BuildConfig.DEBUG. The class itself lives in src/debug,
+        // so enabling the generated flag adds nothing to release behaviour.
+        buildConfig true
+    }
 }
 
 dependencies {

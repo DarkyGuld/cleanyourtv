@@ -1,5 +1,7 @@
 package com.gathin.tvhome;
 
+import android.annotation.SuppressLint;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
@@ -11,12 +13,19 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ImageDecoder;
 import android.graphics.Outline;
+import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
+import android.graphics.drawable.AnimatedImageDrawable;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.view.KeyEvent;
@@ -34,6 +43,8 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -48,7 +59,14 @@ import java.util.Set;
  * then empty slots up to a full row, see {@link DockSlots}), then the module cards the owner chose to show
  * (by label), the rest is alphabetical.
  */
+// AnimatedImageDrawable and ImageDecoder are API 28; every creation path is guarded by a Build.VERSION
+// check, but the field types and stop/start calls are not visible to lint's flow analysis.
+@SuppressLint("NewApi")
 public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+
+    /** Apps whose "original" tile is a branded banner instead of their own (TizenTube is used as YouTube). */
+    private static final Map<String, String> ORIGINAL_BANNERS = Collections.singletonMap(
+            "io.gh.reisxd.tizentube.cobalt", "banner_youtube_plain");
 
     interface TileListener {
         void onTileFocused(int position, View card);
@@ -74,6 +92,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         final String pkg;
         final Drawable banner;
         final Drawable icon;
+        /** Glass icon pack: a full-bleed glass tile generated from the app's colours and icon. */
+        boolean glass;
+        Drawable glassTile;
+        boolean packIcon;
         /** Text under the tile when it is focused in the grid: the label, plus the caption for a card. */
         final String name;
         /** Ambient glow colour; 0 until sampled from the banner, or the card's accent from the start. */
@@ -180,6 +202,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private int savedDocked = -1;
     /** Reorder mode: no empty dock slots, so every position holds a tile that can move. */
     private boolean reordering;
+    /** During a move only the carried tile may take focus, so a shifted tile cannot flash its focus lift. */
+    private String reorderFocusKey;
     private final TileListener listener;
     private final int dockSize;
     /** config dock_row: false makes the dock apps the first tiles of one plain grid (names shown, no empty slots). */
@@ -188,6 +212,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final boolean singleRow;
     /** config always_show_names: the alpha of an unfocused tile's name (0 hides it). */
     private final float restNameAlpha;
+    private final boolean hideNames;
     /** cinematic_home: only then does a launch record the last-opened app the shelf uses. */
     private final boolean cinematic;
     /** Dock order (config.xml dock_apps, or a theme's config.json). */
@@ -203,6 +228,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final boolean animations;
     private final boolean advancedEffects;
     private final boolean showLibrary;
+    /** rows_below_dock = 0: Home shows only the dock row; the App library stays one remote button away. */
+    private final boolean dockOnly;
     /** Packages with a leanback entry at the last reload(): their tiles launch with the leanback category. */
     private Set<String> leanbackPackages = new HashSet<>();
     private final boolean showHomeSettings;
@@ -210,6 +237,16 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final boolean reducedMotion;
     /** The focus zoom may overshoot (config.xml, focus_overshoot). */
     private final boolean focusOvershoot;
+    /** Lumen-style interruptible springs for tile focus (Launcher settings, focus_motion). */
+    private final boolean lumenFocus;
+    /** 0 / 0.55 / 1: strength of the GlassOS-style focus glare. */
+    private final float focusGlossStrength;
+    private final boolean editJiggle;
+    private final boolean liquidGlass;
+    private final boolean glassFullyTransparent;
+    private final float iconGlow;
+    private final boolean tileBorder;
+    private final float glassOpacity;
     /** Package to the action its tile sends instead of the start screen (config.xml, launch_actions). */
     private final Map<String, String> launchActions;
     /** Hold OK opens the activity's tile menu (config.xml, tile_menu); false opens App info, as before. */
@@ -221,6 +258,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Packages drawn from their icon and name even when they have a banner (config.xml icon_tiles). */
     private final Set<String> iconTiles;
     private final List<Entry> items = new ArrayList<>();
+    /** Collision-free long IDs for setHasStableIds; String.hashCode() is only 32 bits. */
+    private final Map<String, Long> stableIds = new HashMap<>();
+    private long nextStableId = 1;
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
         this.ctx = ctx;
@@ -233,14 +273,25 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         this.animations = cfg.animations;
         this.advancedEffects = cfg.animations && cfg.advancedEffects;
         this.showHomeSettings = cfg.showHomeSettingsShortcut;
-        this.showLibrary = LibraryApps.showPill(cfg.appLibrary, cfg.libraryButton, cfg.showLibraryPill);
+        this.dockOnly = cfg.dockRow && cfg.rowsBelowDock == 0;
+        this.showLibrary = !dockOnly && LibraryApps.showPill(cfg.appLibrary, cfg.libraryButton, cfg.showLibraryPill);
         this.reducedMotion = cfg.reducedMotion;
         this.focusOvershoot = cfg.focusOvershoot;
+        this.lumenFocus = Config.focusMotion(ctx) == 1;
+        this.focusGlossStrength = Config.focusGloss(ctx) == 2 ? 1f : Config.focusGloss(ctx) == 1 ? 0.78f : 0f;
+        this.editJiggle = Config.editJiggle(ctx);
+        this.liquidGlass = Config.liquidGlass(ctx);
+        this.glassFullyTransparent = Config.glassFullyTransparent(ctx);
+        this.iconGlow = Math.max(0f, Math.min(1f, Config.iconGlow(ctx) / 100f));
+        this.tileBorder = Config.tileBorder(ctx);
+        this.glassOpacity = Config.glassOpacity(ctx);
         this.rowsBelowDock = cfg.rowsBelowDock;
         this.dockTitle = cfg.dockTitle;
         this.dockRow = cfg.dockRow;
         this.singleRow = cfg.singleRow;
-        this.restNameAlpha = cfg.alwaysShowNames ? 0.75f : 0f;
+        int names = Config.appNames(ctx, cfg.alwaysShowNames);
+        this.restNameAlpha = names == 1 ? 0.75f : 0f;
+        this.hideNames = names == 2;
         this.cinematic = cfg.cinematicHome;
         this.launchActions = cfg.launchActions;
         this.iconTiles = new HashSet<>(Arrays.asList(ctx.getResources().getStringArray(R.array.icon_tiles)));
@@ -297,19 +348,52 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                     appLabels.containsKey(pkg) ? appLabels.get(pkg) : String.valueOf(ri.loadLabel(pm)), pkg);
             if (!seen.add(pkg + '\n' + label)) continue;
             Drawable banner = null;
-            // uniform_tiles draws the icon, so an app's banner is never loaded. A module card keeps its banner.
-            if (!(uniformTiles && card == null)) {
-                banner = bundledBanner(appBanners.get(pkg));
-                if (banner == null) banner = iconTiles.contains(pkg) ? iconBanner(ri.loadIcon(pm)) : loadBanner(pm, ri);
+            int style = IconChoices.style(ctx, pkg);
+            boolean glass = style == IconChoices.GLASS && card == null;
+            String iconPack = Config.iconPack(ctx);
+            boolean packMode = !iconPack.isEmpty();
+            // The Nuvio artwork in both packs has its own white frame; use the clean original Nuvio banner instead.
+            boolean skipPack = "com.nuvio.tv".equals(pkg);
+            Drawable packIcon = packMode && !skipPack
+                    ? IconPacks.icon(ctx, iconPack, label, pkg, component.getClassName()) : null;
+            if (packMode) {
+                // Keep the pack's own 16:9 artwork intact. Missing icons keep the app's own banner.
+                if (packIcon != null) {
+                    banner = packIcon;
+                } else {
+                    Drawable original = "io.gh.reisxd.tizentube.cobalt".equals(pkg)
+                            ? bundledBanner("banner_youtube_plain") : loadBanner(pm, ri);
+                    banner = original != null ? original : packArtwork(ri.loadIcon(pm));
+                }
+                glass = false;
+            } else {
+                if (glass) {
+                    // The app's own banner under a glass surface. TizenTube keeps the YouTube mark.
+                    banner = "io.gh.reisxd.tizentube.cobalt".equals(pkg)
+                            ? bundledBanner("banner_youtube_plain") : loadBanner(pm, ri);
+                }
+                // uniform_tiles draws the icon, so an app's banner is never loaded. A module card keeps its banner.
+                if (!glass && !(uniformTiles && card == null)) {
+                    String customBanner = style == IconChoices.GLITCH ? appBanners.get(pkg)
+                            : style == IconChoices.GLITCH_STILL ? stillBanner(appBanners.get(pkg))
+                            : style == IconChoices.THEME ? themeBannerName(pkg)
+                            : ORIGINAL_BANNERS.get(pkg);
+                    // A theme without an icon for this app falls back to its original look, which for
+                    // TizenTube is the standard YouTube banner.
+                    if (customBanner == null && style == IconChoices.THEME) customBanner = ORIGINAL_BANNERS.get(pkg);
+                    banner = bundledBanner(customBanner);
+                    if (banner == null) banner = iconTiles.contains(pkg) ? iconBanner(ri.loadIcon(pm)) : loadBanner(pm, ri);
+                }
             }
             // The icon is only drawn (and sampled for the glow) when there is no banner, so a tile with a
             // banner skips loading and decoding it.
             Drawable icon = banner == null ? ri.loadIcon(pm) : null;
-            if (card != null) {
-                fresh.add(new Entry(Entry.CARD, label, component, banner, icon, card.caption, card.accent));
-            } else {
-                fresh.add(new Entry(label, component, banner, icon));
-            }
+            Entry entry = card != null
+                    ? new Entry(Entry.CARD, label, component, banner, icon, card.caption, card.accent)
+                    : new Entry(label, component, banner, icon);
+            entry.glass = glass;
+            entry.packIcon = packIcon != null;
+            fresh.add(entry);
         }
         Collections.sort(fresh, (a, b) -> {
             // The owner's own order first; tiles it does not know (new installs) follow by the rule below.
@@ -326,8 +410,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             if (ca != cb) return ca ? -1 : 1;
             return a.label.compareToIgnoreCase(b.label);
         });
+        // rows_below_dock = 0 only starts with the dock on screen. All other apps stay in the grid so Down
+        // scrolls them in; cutting them off here made the setting look like a dead end.
         // Retain the optional Default-home tile until dependent tile-ordering work is merged.
-        if (showHomeSettings
+        if (!dockOnly && showHomeSettings
                 && pm.resolveActivity(new Intent(Settings.ACTION_HOME_SETTINGS), 0) != null) {
             fresh.add(new Entry(Entry.HOME_SETTINGS, ctx.getString(R.string.home_settings),
                     new ComponentName(ctx, HomeSettingsActivity.class), null,
@@ -345,6 +431,133 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         notifyDataSetChanged();
     }
 
+    /** Removes the pack icon's plate, keeps its logo and scales that logo into one shared box. */
+    private Drawable packLogo(Drawable icon) {
+        int w = 320, h = 180;
+        Bitmap source = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(source);
+        if (icon != null) {
+            int iw = icon.getIntrinsicWidth();
+            int ih = icon.getIntrinsicHeight();
+            if (iw > 0 && ih > 0) {
+                // Cover the canvas first: square app icons then expose their own plate colour in every corner.
+                float scale = Math.max(w / (float) iw, h / (float) ih);
+                int dw = Math.max(1, Math.round(iw * scale));
+                int dh = Math.max(1, Math.round(ih * scale));
+                int left = (w - dw) / 2;
+                int top = (h - dh) / 2;
+                icon.setBounds(left, top, left + dw, top + dh);
+            } else {
+                icon.setBounds(0, 0, w, h);
+            }
+            icon.draw(canvas);
+        }
+        int[] pixels = new int[w * h];
+        source.getPixels(pixels, 0, w, 0, 0, w, h);
+        int[] corners = {0, w - 1, (h - 1) * w, (h - 1) * w + w - 1};
+        int bgR = 0, bgG = 0, bgB = 0, bgAlpha = 0;
+        for (int index : corners) {
+            bgAlpha += Color.alpha(pixels[index]);
+            bgR += Color.red(pixels[index]);
+            bgG += Color.green(pixels[index]);
+            bgB += Color.blue(pixels[index]);
+        }
+        bgAlpha /= 4;
+        bgR /= 4;
+        bgG /= 4;
+        bgB /= 4;
+        boolean[] background = new boolean[pixels.length];
+        for (int i = 0; i < pixels.length; i++) {
+            int alpha = Color.alpha(pixels[i]);
+            if (alpha < 32) {
+                background[i] = true;
+            } else if (bgAlpha >= 32) {
+                int distance = Math.max(Math.abs(Color.red(pixels[i]) - bgR),
+                        Math.max(Math.abs(Color.green(pixels[i]) - bgG),
+                                Math.abs(Color.blue(pixels[i]) - bgB)));
+                background[i] = distance < 34;
+            }
+        }
+        boolean[] removed = new boolean[pixels.length];
+        java.util.ArrayDeque<Integer> queue = new java.util.ArrayDeque<>();
+        for (int x = 0; x < w; x++) {
+            enqueue(x, background, removed, queue);
+            enqueue((h - 1) * w + x, background, removed, queue);
+        }
+        for (int y = 0; y < h; y++) {
+            enqueue(y * w, background, removed, queue);
+            enqueue(y * w + w - 1, background, removed, queue);
+        }
+        while (!queue.isEmpty()) {
+            int index = queue.removeFirst();
+            int x = index % w;
+            int y = index / w;
+            if (x > 0) enqueue(index - 1, background, removed, queue);
+            if (x < w - 1) enqueue(index + 1, background, removed, queue);
+            if (y > 0) enqueue(index - w, background, removed, queue);
+            if (y < h - 1) enqueue(index + w, background, removed, queue);
+        }
+        int minX = w, minY = h, maxX = -1, maxY = -1;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int index = y * w + x;
+                if (removed[index] || Color.alpha(pixels[index]) < 12) continue;
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+            }
+        }
+        if (maxX < minX || maxY < minY) {
+            return new BitmapDrawable(ctx.getResources(), source);
+        }
+        Bitmap foreground = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        int[] foregroundPixels = new int[pixels.length];
+        for (int i = 0; i < pixels.length; i++) {
+            foregroundPixels[i] = removed[i] ? 0 : pixels[i];
+        }
+        foreground.setPixels(foregroundPixels, 0, w, 0, 0, w, h);
+        Bitmap cropped = Bitmap.createBitmap(foreground, minX, minY,
+                maxX - minX + 1, maxY - minY + 1);
+        Bitmap output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas out = new Canvas(output);
+        float scale = Math.min(w * 0.94f / cropped.getWidth(), h * 0.80f / cropped.getHeight());
+        int dw = Math.max(1, Math.round(cropped.getWidth() * scale));
+        int dh = Math.max(1, Math.round(cropped.getHeight() * scale));
+        android.graphics.Rect dst = new android.graphics.Rect(
+                (w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2);
+        out.drawBitmap(cropped, null, dst, new Paint(Paint.FILTER_BITMAP_FLAG));
+        return new BitmapDrawable(ctx.getResources(), output);
+    }
+
+    private void enqueue(int index, boolean[] background, boolean[] removed,
+                         java.util.ArrayDeque<Integer> queue) {
+        if (index < 0 || index >= background.length || !background[index] || removed[index]) return;
+        removed[index] = true;
+        queue.addLast(index);
+    }
+
+    /** Normalises pack art and fallback icons into one consistent 16:9 frame. */
+    private Drawable packArtwork(Drawable icon) {
+        int w = 320, h = 180;
+        Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        if (icon != null) {
+            int iw = icon.getIntrinsicWidth();
+            int ih = icon.getIntrinsicHeight();
+            if (iw <= 0 || ih <= 0) {
+                iw = w;
+                ih = h;
+            }
+            float scale = Math.min(w * 0.86f / iw, h * 0.78f / ih);
+            int dw = Math.max(1, Math.round(iw * scale));
+            int dh = Math.max(1, Math.round(ih * scale));
+            icon.setBounds((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2);
+            icon.draw(canvas);
+        }
+        return new BitmapDrawable(ctx.getResources(), bitmap);
+    }
+
     /** icon_tiles: the app's icon centred on a dark banner-shaped tile, for apps whose own banner crops badly. */
     private Drawable iconBanner(Drawable icon) {
         int w = 320, h = 180, side = 104;
@@ -356,11 +569,109 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return new android.graphics.drawable.BitmapDrawable(ctx.getResources(), bmp);
     }
 
-    /** A banner_* drawable bundled with the launcher, or null for none or a name that is not one. */
+    /** Whether this package has a bundled custom banner that can be toggled in the tile menu. */
+    boolean hasCustomBanner(String pkg) {
+        return appBanners.containsKey(pkg);
+    }
+
+    /** Every package with a bundled custom banner, for the "all icons" toggle. */
+    Set<String> customBannerPackages() {
+        return Collections.unmodifiableSet(appBanners.keySet());
+    }
+
+    /** True when every app with a custom banner currently uses the given style. */
+    boolean allCustomBannersStyle(int style) {
+        for (String pkg : appBanners.keySet()) {
+            if (IconChoices.style(ctx, pkg) != style) return false;
+        }
+        return true;
+    }
+
+    /** Theme icon path for a package: icons/<package>.webp/png/jpg, or null. */
+    /** The static twin of an animated Glitch banner (banner_glitch_x -> banner_still_x). */
+    private static String stillBanner(String glitch) {
+        if (glitch == null || !glitch.startsWith("banner_glitch_")) return null;
+        return "banner_still_" + glitch.substring("banner_glitch_".length());
+    }
+
+    private String themeBannerName(String pkg) {
+        File dir = Config.dir(ctx);
+        if (dir == null) return null;
+        for (String ext : new String[]{".webp", ".png", ".jpg", ".jpeg"}) {
+            File file = new File(new File(dir, ThemeFiles.ICONS), pkg + ext);
+            if (file.isFile()) return ThemeFiles.ICONS + "/" + pkg + ext;
+        }
+        return null;
+    }
+
+    /** True while Home is in front; a rebind must not restart a banner behind another app. */
+    private boolean animationsRunning = true;
+
+    /** Starts every animated banner on the same frame, once the grid has bound its views. */
+    void startAnimations() {
+        animationsRunning = true;
+        if (Build.VERSION.SDK_INT < 28) return;
+        for (Entry e : items) {
+            if (e.banner instanceof AnimatedImageDrawable) {
+                AnimatedImageDrawable animation = (AnimatedImageDrawable) e.banner;
+                animation.setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
+                animation.start();
+            }
+        }
+    }
+
+    /** Stops the Glitch banners while Home is in the background; they keep the compositor busy otherwise. */
+    void stopAnimations() {
+        animationsRunning = false;
+        if (Build.VERSION.SDK_INT < 28) return;
+        for (Entry e : items) {
+            if (e.banner instanceof AnimatedImageDrawable) {
+                ((AnimatedImageDrawable) e.banner).stop();
+            }
+        }
+    }
+
+    /** A banner_* drawable bundled with the launcher, or an icons/<package> file from the theme. */
     private Drawable bundledBanner(String name) {
-        if (name == null || !name.startsWith("banner_")) return null;
+        if (name == null) return null;
+        if (name.startsWith(ThemeFiles.ICONS + "/") && !name.contains("..")) {
+            File dir = Config.dir(ctx);
+            File file = dir == null ? null : new File(dir, name);
+            if (file == null || !file.isFile()) return null;
+            if (Build.VERSION.SDK_INT >= 28) {
+                try {
+                    Drawable d = ImageDecoder.decodeDrawable(
+                            ImageDecoder.createSource(file),
+                            (decoder, info, source) -> decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE));
+                    if (d instanceof AnimatedImageDrawable) {
+                        ((AnimatedImageDrawable) d).setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
+                    }
+                    return d;
+                } catch (IOException | RuntimeException ignored) {
+                    // Fall back to the static file below.
+                }
+            }
+            return Drawable.createFromPath(file.getAbsolutePath());
+        }
+        if (!name.startsWith("banner_")) return null;
         int id = ctx.getResources().getIdentifier(name, "drawable", ctx.getPackageName());
-        return id != 0 ? ctx.getDrawable(id) : null;
+        if (id == 0) return null;
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                // Software allocation: vividColor() samples the banner on a software Canvas, and
+                // drawing a hardware bitmap there throws "Software rendering doesn't support hardware bitmaps".
+                Drawable d = ImageDecoder.decodeDrawable(
+                        ImageDecoder.createSource(ctx.getResources(), id),
+                        (decoder, info, source) -> decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE));
+                if (d instanceof AnimatedImageDrawable) {
+                    ((AnimatedImageDrawable) d).setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
+                }
+                return d;
+            } catch (IOException | RuntimeException ignored) {
+                // Fall back to the static decode below; a corrupt animation must not hide the app tile.
+            }
+        }
+        return ctx.getDrawable(id);
     }
 
     private Drawable loadBanner(PackageManager pm, ResolveInfo ri) {
@@ -424,7 +735,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         View name = v.findViewById(R.id.name);
         ViewGroup.MarginLayoutParams nameLp = (ViewGroup.MarginLayoutParams) name.getLayoutParams();
         nameLp.width = w;
-        nameLp.topMargin = h + Math.round((dockRow ? 7 : 4) * density);
+        nameLp.topMargin = h + Math.round(5 * density);
         if (!dockRow) {
             // Compact spacing (COMPACT_ITEM_EXTRA_DP): 4dp item padding and a 20dp name instead of 8dp and 22dp.
             nameLp.height = Math.round(20 * density);
@@ -452,7 +763,55 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             View label = v.findViewById(R.id.label);
             label.setPadding(label.getPaddingLeft(), label.getPaddingTop(), label.getPaddingRight(), Math.round(4f * density));
         }
-        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha, focusOvershoot);
+        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha,
+                focusOvershoot, lumenFocus, focusGlossStrength, editJiggle, hideNames);
+    }
+
+    @Override
+    public void onViewRecycled(@NonNull RecyclerView.ViewHolder holder) {
+        if (holder instanceof Holder) {
+            Motion.cancelFocus(((Holder) holder).card);
+            ((Holder) holder).jiggle(false);
+            Drawable d = ((Holder) holder).banner.getDrawable();
+            if (Build.VERSION.SDK_INT >= 28 && d instanceof AnimatedImageDrawable) {
+                ((AnimatedImageDrawable) d).stop();
+            }
+        }
+        super.onViewRecycled(holder);
+    }
+
+    /** Installed icon-pack marks are transparent, so give them a little more room than a banner icon. */
+    private void sizePackIcon(Holder h) {
+        int cardHeight = h.card.getLayoutParams().height;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) h.icon.getLayoutParams();
+        int side = Math.round(cardHeight * 0.72f);
+        if (lp.width != side || lp.height != side || lp.bottomMargin != 0) {
+            lp.width = lp.height = side;
+            lp.bottomMargin = 0;
+            h.icon.setLayoutParams(lp);
+        }
+    }
+
+    /** Glass uses the uniform tile's large mark; the normal icon tile keeps its 48dp mark and caption room. */
+    private void sizeIcon(Holder h, boolean glass) {
+        int cardHeight = h.card.getLayoutParams().height;
+        float density = ctx.getResources().getDisplayMetrics().density;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) h.icon.getLayoutParams();
+        int side;
+        int bottom;
+        if (glass || uniformTiles) {
+            side = Math.round(cardHeight * ICON_SHARE);
+            bottom = 0;
+        } else {
+            float scale = cardHeight / (DESIGN_H_DP * density);
+            side = Math.round(48f * density * scale);
+            bottom = Math.round(14f * density * scale);
+        }
+        if (lp.width != side || lp.height != side || lp.bottomMargin != bottom) {
+            lp.width = lp.height = side;
+            lp.bottomMargin = bottom;
+            h.icon.setLayoutParams(lp);
+        }
     }
 
     @Override
@@ -460,6 +819,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         if (isLibraryAt(position)) return;
         Holder h = (Holder) holder;
+        Motion.cancelFocus(h.card);
         Entry e = items.get(position);
         if (e.kind == Entry.EMPTY) {
             // A free dock slot keeps its place in the row and the band, but shows nothing and takes no focus.
@@ -470,33 +830,109 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             h.icon.setImageDrawable(null);
             h.card.setOnClickListener(null);
             h.card.setOnLongClickListener(null);
+            h.jiggle(false);
             return;
         }
         h.card.setVisibility(View.VISIBLE);
-        h.card.setFocusable(true);
+        String tileKey = e.component == null ? null : e.component.flattenToShortString();
+        h.card.setFocusable(reorderFocusKey == null || reorderFocusKey.equals(tileKey));
         h.name.setText(e.name);
+        h.jiggle(reordering && reorderFocusKey != null && reorderFocusKey.equals(tileKey));
         // The dock has no labels, unless always_show_names asks for them (DockDecoration then makes room in the band).
         // In a single row every tile is the dock's kind: the big title above names it.
         boolean dockKind = DockSlots.inDockRow(dockRow, singleRow, position, dockSize);
-        h.name.setVisibility(dockKind && restNameAlpha == 0f ? View.INVISIBLE : View.VISIBLE);
         h.inDock = dockKind;
         boolean focused = h.card.isFocused();   // a rebind after reload() can hit the focused tile
-        h.name.setAlpha(focused ? 1f : restNameAlpha);
+        // "On focus" must also work in the dock: reserve the band space always (DockDecoration.names),
+        // but only reveal the label while that dock tile has focus.
+        boolean clearGlass = liquidGlass && glassFullyTransparent;
+        if (hideNames) {
+            // Alpha 0 is still announced by TalkBack; make the label invisible to both.
+            h.name.setVisibility(View.INVISIBLE);
+            h.name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            h.name.setAlpha(0f);
+        } else {
+            h.name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+            h.name.setVisibility(dockKind && restNameAlpha == 0f && !focused
+                    ? View.INVISIBLE : View.VISIBLE);
+            h.name.setAlpha(focused ? 1f : restNameAlpha);
+        }
+        float glow = iconGlow;
+        h.focusGlow.setAlpha(0f);
+        h.focusRing.setAlpha(0f);
+        h.focusGloss.setStrength(focusGlossStrength);
+        h.focusGloss.focus(focused, true);
         h.card.setScaleX(focused && animations ? focusScale() : 1f);
         h.card.setScaleY(focused && animations ? focusScale() : 1f);
         h.card.setTranslationY(focused && advancedEffects && !dockKind ? -4f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.card.setTranslationZ(focused && advancedEffects ? 8f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.banner.setScaleX(focused && advancedEffects ? 1.035f : 1f);
-        h.banner.setScaleY(focused && advancedEffects ? 1.035f : 1f);
+        h.card.setTranslationZ(focused && advancedEffects ? 8f * ctx.getResources().getDisplayMetrics().density * glow : 0f);
+        h.packTile = e.packIcon;
+        float packZoom = e.packIcon ? 1.30f : 1f;
+        h.banner.setScaleX((focused && advancedEffects ? 1.035f : 1f) * packZoom);
+        h.banner.setScaleY((focused && advancedEffects ? 1.035f : 1f) * packZoom);
+        h.banner.setAlpha(1f);
+        h.banner.setColorFilter(null);
+        h.glassOverlay.setVisibility(View.GONE);
         // A fully opaque banner covers the whole card (centerCrop), so the card's own fill under it is drawn for
         // nothing on every frame; keep it under banners with transparent parts and under icon tiles.
         h.card.setBackground(e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE ? null : h.cardBackground);
+        h.card.setForeground(tileBorder ? ctx.getDrawable(R.drawable.tile_rest_border) : null);
+        if (clearGlass) h.card.setBackground(null);
+        if (e.packIcon) h.card.setBackgroundResource(R.drawable.pack_plate);
         if (uniformTiles && e.banner == null) {
             if (e.backdrop == null) e.backdrop = backdrop(e.icon, ambientColorAt(position));
             h.card.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, e.backdrop));
         }
-        if (e.banner != null) {
+        if (e.glass && e.banner != null) {
+            // The original app banner itself becomes the glass tile; its alpha is the transparency setting.
+            h.glassOverlay.setVisibility(View.VISIBLE);
+            h.card.setBackground(null);
+            Drawable previous = h.banner.getDrawable();
+            if (Build.VERSION.SDK_INT >= 28 && previous instanceof AnimatedImageDrawable
+                    && previous != e.banner) {
+                ((AnimatedImageDrawable) previous).stop();
+            }
             h.banner.setImageDrawable(e.banner);
+            if (Build.VERSION.SDK_INT >= 28 && e.banner instanceof AnimatedImageDrawable
+                    && animationsRunning) {
+                ((AnimatedImageDrawable) e.banner).start();
+            }
+            h.banner.setVisibility(View.VISIBLE);
+            // Keep the artwork clear; the glass transparency setting controls the tile around it.
+            h.banner.setAlpha(0.70f + 0.25f * glassOpacity);
+            h.banner.setColorFilter(new PorterDuffColorFilter(0x1AFFFFFF, PorterDuff.Mode.SCREEN));
+            h.icon.setVisibility(View.GONE);
+            h.label.setVisibility(View.GONE);
+        } else if (e.glass) {
+            if (e.glassTile == null) {
+                int cardWidth = h.card.getLayoutParams().width;
+                int cardHeight = h.card.getLayoutParams().height;
+                e.glassTile = GlassIcons.tile(ctx, e.pkg, e.label, e.icon, cardWidth, cardHeight);
+            }
+            if (e.glassTile != null) {
+                h.card.setBackground(e.glassTile);
+                h.icon.setImageDrawable(null);
+                h.icon.setVisibility(View.GONE);
+            } else {
+                h.card.setBackgroundResource(R.drawable.glass_icon_tile);
+                h.icon.setImageDrawable(e.icon);
+                h.icon.setVisibility(View.VISIBLE);
+                sizeIcon(h, true);
+            }
+            h.banner.setImageDrawable(null);
+            h.banner.setVisibility(View.GONE);
+            h.label.setVisibility(View.GONE);
+        } else if (e.banner != null) {
+            Drawable previous = h.banner.getDrawable();
+            if (Build.VERSION.SDK_INT >= 28 && previous instanceof AnimatedImageDrawable
+                    && previous != e.banner) {
+                ((AnimatedImageDrawable) previous).stop();
+            }
+            h.banner.setImageDrawable(e.banner);
+            if (Build.VERSION.SDK_INT >= 28 && e.banner instanceof AnimatedImageDrawable
+                    && animationsRunning) {
+                ((AnimatedImageDrawable) e.banner).start();
+            }
             h.banner.setVisibility(View.VISIBLE);
             h.icon.setVisibility(View.GONE);
             h.label.setVisibility(View.GONE);
@@ -507,15 +943,21 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             h.icon.setVisibility(View.VISIBLE);
             h.label.setText(e.label);
             h.label.setVisibility(uniformTiles ? View.GONE : View.VISIBLE);
+            sizeIcon(h, false);
         }
         h.card.setOnClickListener(v -> launch(e));
         h.card.setOnLongClickListener(v -> {
+            // Use the position at press time, not the Entry captured by the bind: a reload/move can
+            // otherwise open App info or the tile menu for the app that used to be here.
+            int pos = h.getBindingAdapterPosition();
+            if (pos == RecyclerView.NO_POSITION || pos >= items.size()) return true;
+            Entry current = items.get(pos);
             if (tileMenu) {
-                int pos = h.getBindingAdapterPosition();
-                if (pos != RecyclerView.NO_POSITION) listener.onTileLongPress(pos, v);
+                listener.onTileLongPress(pos, v);
                 return true;
             }
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + e.pkg));
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + current.pkg));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
                 ctx.startActivity(i);
@@ -580,7 +1022,16 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     @Override
     public long getItemId(int position) {
-        return isLibraryAt(position) ? Long.MIN_VALUE : items.get(position).component.flattenToShortString().hashCode();
+        if (isLibraryAt(position)) return Long.MIN_VALUE;
+        Entry entry = items.get(position);
+        String key = entry.component != null ? entry.component.flattenToShortString()
+                : entry.kind == Entry.EMPTY ? "empty:" + position : entry.kind + ":" + entry.pkg;
+        Long id = stableIds.get(key);
+        if (id == null) {
+            id = nextStableId++;
+            stableIds.put(key, id);
+        }
+        return id;
     }
 
     /** Uses this saved order and dock size from the next reload() (Order.ranks, Order.docked). */
@@ -601,7 +1052,13 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     /** Reorder mode on or off; takes effect at the next reload() (empty dock slots are left out while on). */
     void setReordering(boolean on) {
+        if (reordering == on) return;
         reordering = on;
+        notifyDataSetChanged();
+    }
+
+    void setReorderFocusKey(String key) {
+        reorderFocusKey = key;
     }
 
     boolean hasEmptySlots() {
@@ -630,7 +1087,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         items.add(to, items.remove(from));
         notifyItemMoved(from, to);
         // The dock row hides names by position: rebind the tiles whose side of the dock edge changed.
-        if (from < dockSize || to < dockSize) {
+        // While reordering, this range change would cancel the move animation, so leave it for the
+        // next full bind; the names are not the focus of the move.
+        if (!reordering && (from < dockSize || to < dockSize)) {
             int lo = Math.min(from, to), hi = Math.max(from, to);
             notifyItemRangeChanged(lo, hi - lo + 1);
         }
@@ -699,6 +1158,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private static int dominantColor(Drawable live) {
         if (live == null) return 0xFF6E6E73;
         Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
+        d = softwareDrawable(d);
         Rect saved = new Rect(d.getBounds());
         int n = 24;
         Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
@@ -762,6 +1222,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private static int[] iconPlate(Drawable live) {
         if (live == null) return null;
         Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
+        d = softwareDrawable(d);
         Rect saved = new Rect(d.getBounds());
         int n = 48;
         Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
@@ -849,10 +1310,23 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return Math.max(0, Math.min(255, Math.round(v)));
     }
 
+    /** A drawable safe to draw into a software Canvas, even when the source bitmap is hardware-backed. */
+    private static Drawable softwareDrawable(Drawable live) {
+        if (live instanceof BitmapDrawable) {
+            Bitmap bitmap = ((BitmapDrawable) live).getBitmap();
+            if (bitmap != null && bitmap.getConfig() == Bitmap.Config.HARDWARE) {
+                Bitmap copy = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+                if (copy != null) return new BitmapDrawable(Resources.getSystem(), copy);
+            }
+        }
+        return live;
+    }
+
     private static int vividColor(Drawable live) {
         if (live == null) return 0xFF444444;
         // Draw a private copy: changing the bounds of the drawable an ImageView shows would blank the tile.
         Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
+        d = softwareDrawable(d);
         Rect saved = new Rect(d.getBounds());
         int n = 12;
         Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
@@ -907,29 +1381,57 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         final ImageView icon;
         final TextView label;
         final TextView name;
+        final View glassOverlay;
+        final FocusGlossView focusGloss;
+        final View focusRing;
+        final View focusGlow;
         final boolean animations;
         final boolean advancedEffects;
         final boolean reducedMotion;
         /** Alpha of the name while the tile is not focused (always_show_names). */
         final float restNameAlpha;
+        final boolean hideNames;
         final boolean overshoot;
+        /** Focus shadow strength from Launcher settings, 0..1. */
+        final float glowFactor;
+        final boolean lumenFocus;
+        final float focusGlossStrength;
+        final boolean editJiggle;
+        /** An installed-pack tile: crop its outer border slightly and keep the logo large. */
+        boolean packTile;
         /** A dock tile: it grows in place without advanced_effects' lift, which reads as off-centre in the band (#2135). */
         boolean inDock;
+        private ValueAnimator jiggle;
+        private boolean jiggling;
 
         Holder(View v, TileListener listener, boolean animations, boolean advancedEffects,
-               boolean reducedMotion, float restNameAlpha, boolean overshoot) {
+               boolean reducedMotion, float restNameAlpha, boolean overshoot,
+               boolean lumenFocus, float focusGlossStrength, boolean editJiggle, boolean hideNames) {
             super(v);
             card = v.findViewById(R.id.card);
+            // The launcher draws its own focus glow; Android's default white highlight would sit on top of it.
+            card.setDefaultFocusHighlightEnabled(false);
             cardBackground = card.getBackground();
             banner = v.findViewById(R.id.banner);
             icon = v.findViewById(R.id.icon);
             label = v.findViewById(R.id.label);
             name = v.findViewById(R.id.name);
+            glassOverlay = v.findViewById(R.id.glassOverlay);
+            focusRing = v.findViewById(R.id.focusRing);
+            focusGloss = v.findViewById(R.id.focusGloss);
+            focusGloss.setStrength(focusGlossStrength);
+            focusGlow = v.findViewById(R.id.focusGlow);
+            if (focusGlow instanceof FocusGlowView) ((FocusGlowView) focusGlow).setCard(card);
             this.animations = animations;
             this.advancedEffects = advancedEffects;
             this.reducedMotion = reducedMotion;
             this.restNameAlpha = restNameAlpha;
             this.overshoot = overshoot;
+            this.glowFactor = Math.max(0f, Math.min(1f, Config.iconGlow(v.getContext()) / 100f));
+            this.lumenFocus = lumenFocus;
+            this.focusGlossStrength = focusGlossStrength;
+            this.editJiggle = editJiggle;
+            this.hideNames = hideNames;
 
             final float density = v.getResources().getDisplayMetrics().density;
             card.setOutlineProvider(new ViewOutlineProvider() {
@@ -953,44 +1455,64 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 view.animate().cancel();
                 banner.animate().cancel();
                 name.animate().cancel();
+                // A dock label reserved for "On focus" is INVISIBLE while idle; focus must reveal it
+                // immediately, before the alpha animation runs.
+                name.setVisibility(hideNames || (inDock && restNameAlpha == 0f && !focused)
+                        ? View.INVISIBLE : View.VISIBLE);
+                float glow = glowFactor;
+                focusGlow.setAlpha(0f);
+                focusRing.setAlpha(0f);
+                focusGloss.focus(focused, !animations || reducedMotion);
                 float scale = !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
                 float s = focused ? scale : 1f;
+                float packZoom = packTile ? 1.30f : 1f;
                 if (!animations) {
                     view.setScaleX(1f);
                     view.setScaleY(1f);
                     view.setTranslationY(0f);
                     view.setTranslationZ(0f);
-                    banner.setScaleX(1f);
-                    banner.setScaleY(1f);
-                    name.setAlpha(focused ? 1f : restNameAlpha);
+                    banner.setScaleX(packZoom);
+                    banner.setScaleY(packZoom);
+                    name.setAlpha(hideNames ? 0f : focused ? 1f : restNameAlpha);
                     name.setTranslationY(0f);
                 } else if (reducedMotion) {
                     // A short zoom with no hardware layer: building a layer for so short an animation costs more
                     // frames than it saves. The name just appears instead of fading.
                     view.animate().scaleX(s).scaleY(s)
                             .translationY(focused && advancedEffects && !inDock ? -4f * density : 0f)
-                            .translationZ(focused && advancedEffects ? 8f * density : 0f)
+                            .translationZ(focused && advancedEffects ? 8f * density * glow : 0f)
                             .setDuration(focused ? Motion.REDUCED_MS : 60)
                             .setInterpolator(new DecelerateInterpolator())
                             .start();
-                    name.setAlpha(focused ? 1f : restNameAlpha);
+                    banner.setScaleX(packZoom);
+                    banner.setScaleY(packZoom);
+                    name.setAlpha(hideNames ? 0f : focused ? 1f : restNameAlpha);
                     // Same place as the full motion's slide ends: the layout's -6dp is only its starting point, and
                     // left there the name overlaps the zoomed tile.
                     // Only on focus: snapping it back to -6dp while it fades out would jump it up over the tile.
                     if (focused) name.setTranslationY(density * 4f);
+                } else if (lumenFocus) {
+                    Motion.focus(view, focused, scale,
+                            advancedEffects && !inDock ? 4f * density : 0f,
+                            advancedEffects ? 8f * density * glow : 0f);
+                    banner.animate().scaleX((focused && advancedEffects ? 1.035f : 1f) * packZoom)
+                            .scaleY((focused && advancedEffects ? 1.035f : 1f) * packZoom)
+                            .setDuration(280).start();
+                    name.animate().alpha(hideNames ? 0f : focused ? 1f : restNameAlpha)
+                            .translationY(focused ? density * 4f : -density * 6f)
+                            .setDuration(220).start();
                 } else {
                     view.animate().scaleX(s).scaleY(s)
                             .translationY(focused && advancedEffects && !inDock ? -4f * density : 0f)
-                            .translationZ(focused && advancedEffects ? 8f * density : 0f)
+                            .translationZ(focused && advancedEffects ? 8f * density * glow : 0f)
                             .setDuration(advancedEffects ? (focused ? 220 : 170) : (focused ? 260 : 180))
                             .setInterpolator(focused && !overshoot ? new DecelerateInterpolator(1.5f)
                                     : new OvershootInterpolator(focused ? (advancedEffects ? 0.7f : 1.6f) : 0f))
                             .withLayer().start();
-                    if (advancedEffects) {
-                        banner.animate().scaleX(focused ? 1.035f : 1f).scaleY(focused ? 1.035f : 1f)
-                                .setDuration(280).start();
-                    }
-                    name.animate().alpha(focused ? 1f : restNameAlpha)
+                    banner.animate().scaleX((focused && advancedEffects ? 1.035f : 1f) * packZoom)
+                            .scaleY((focused && advancedEffects ? 1.035f : 1f) * packZoom)
+                            .setDuration(280).start();
+                    name.animate().alpha(hideNames ? 0f : focused ? 1f : restNameAlpha)
                             .translationY(focused ? density * 4f : -density * 6f)
                             .setDuration(220).start();
                 }
@@ -999,6 +1521,33 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                     listener.onTileFocused(pos, view);
                 }
             });
+        }
+
+        void jiggle(boolean on) {
+            if (!editJiggle) on = false;
+            if (jiggling == on) return;
+            jiggling = on;
+            if (jiggle != null) {
+                jiggle.cancel();
+                jiggle = null;
+            }
+            if (!on) {
+                card.animate().rotation(0f).setDuration(120)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                return;
+            }
+            // GlassOS edit mode: a quick, even rock with a random phase per tile, so the shelf
+            // breathes instead of all icons snapping in lockstep. Rotation only, never alpha.
+            float deg = 1.4f;
+            long half = 150L;
+            jiggle = ValueAnimator.ofFloat(-deg, deg);
+            jiggle.setDuration(half);
+            jiggle.setRepeatCount(ValueAnimator.INFINITE);
+            jiggle.setRepeatMode(ValueAnimator.REVERSE);
+            jiggle.setCurrentPlayTime((long) (Math.random() * 1000) % half);
+            jiggle.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+            jiggle.addUpdateListener(a -> card.setRotation((float) a.getAnimatedValue()));
+            jiggle.start();
         }
     }
 }
