@@ -427,4 +427,9 @@
     <string name="screensaver_active_media">Active music: %1$s</string>
     <string name="screensaver_no_media">Active music: none</string>
     <string name="screensaver_hint">AerialViews is a screensaver only; it has no live wallpaper.</string>
+    <string name="screensaver_auto_start_state">TCL auto-start: %1$s</string>
+    <string name="screensaver_auto_start_allowed">Allowed</string>
+    <string name="screensaver_auto_start_blocked">Blocked</string>
+    <string name="screensaver_auto_start_hint">run adb: appops set com.neilturner.aerialviews APP_AUTO_START allow</string>
+    <string name="screensaver_overlay_no_text">Some apps (e.g. Spotify TV) post a media notification without title/artist text. AerialViews\' Now Playing overlay then stays empty; the launcher bar reads the media session and still shows the track.</string>
 </resources>

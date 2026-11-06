@@ -383,4 +383,9 @@
     <string name="screensaver_active_media">Aktiv musikk: %1$s</string>
     <string name="screensaver_no_media">Aktiv musikk: ingen</string>
     <string name="screensaver_hint">AerialViews er bare en skjermsparer; den har ingen live-bakgrunn.</string>
+    <string name="screensaver_auto_start_state">TCL auto-start: %1$s</string>
+    <string name="screensaver_auto_start_allowed">Tillatt</string>
+    <string name="screensaver_auto_start_blocked">Blokkert</string>
+    <string name="screensaver_auto_start_hint">kjør adb: appops set com.neilturner.aerialviews APP_AUTO_START allow</string>
+    <string name="screensaver_overlay_no_text">Noen apper (f.eks. Spotify TV) legger ut et medievarsel uten tittel/artist-tekst. AerialViews\' Now Playing-overlegg blir da tomt; launcher-linjen leser mediesesjonen og viser fortsatt sangen.</string>
 </resources>

@@ -74,6 +74,7 @@ public final class LauncherSettingsActivity extends Activity {
     private TextView screensaverMediaChoice;
     private TextView aerialViewsChoice;
     private TextView screensaverStatusChoice;
+    private TextView screensaverAutoStartChoice;
     private TextView screensaverTestChoice;
     private TextView screensaverNotificationChoice;
     private TextView screensaverOverlayChoice;
@@ -312,6 +313,7 @@ public final class LauncherSettingsActivity extends Activity {
         aerialViewsChoice = findViewById(R.id.aerialViewsChoice);
         aerialViewsChoice.setOnClickListener(v -> showScreensaverPicker());
         screensaverStatusChoice = findViewById(R.id.screensaverStatusChoice);
+        screensaverAutoStartChoice = findViewById(R.id.screensaverAutoStartChoice);
         screensaverTestChoice = findViewById(R.id.screensaverTestChoice);
         screensaverTestChoice.setOnClickListener(v -> {
             Toast.makeText(this, R.string.screensaver_test_started, Toast.LENGTH_SHORT).show();
@@ -1269,6 +1271,11 @@ public final class LauncherSettingsActivity extends Activity {
         String dreamLabel = selected.isEmpty() ? getString(R.string.screensaver_engine_tv)
                 : selected + (ScreensaverController.isEnabled(this) ? "" : " (disabled)");
         screensaverStatusChoice.setText(getString(R.string.screensaver_changed, dreamLabel));
+        boolean autoStart = ScreensaverController.autoStartAllowed(this);
+        screensaverAutoStartChoice.setText(getString(R.string.screensaver_auto_start_state,
+                getString(autoStart ? R.string.screensaver_auto_start_allowed
+                        : R.string.screensaver_auto_start_blocked))
+                + (autoStart ? "" : " · " + getString(R.string.screensaver_auto_start_hint)));
         screensaverTestChoice.setText(R.string.screensaver_test);
         boolean notificationAccess = ScreensaverController.notificationAccessEnabled(this);
         screensaverNotificationChoice.setText(getString(R.string.screensaver_notification_state,

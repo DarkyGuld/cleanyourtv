@@ -28,7 +28,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/launcher_settings"
+                android:text="@string/settings"
                 android:textColor="#FF101419"
                 android:textSize="26sp"
                 android:fontFamily="@string/font_medium" />
@@ -357,6 +357,12 @@
                         android:layout_marginTop="10dp"
                         android:clickable="false"
                         android:focusable="false" />
+                    <com.gathin.tvhome.SettingsRow
+                        android:id="@+id/screensaverAutoStartChoice"
+                        style="@style/SettingsRow"
+                        android:layout_marginTop="10dp"
+                        android:clickable="false"
+                        android:focusable="false" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverTestChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverNotificationChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverOverlayChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
@@ -383,6 +389,13 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
                         android:text="@string/screensaver_overlay_unverified"
+                        android:textColor="#99000000"
+                        android:textSize="12sp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/screensaver_overlay_no_text"
                         android:textColor="#99000000"
                         android:textSize="12sp" />
 

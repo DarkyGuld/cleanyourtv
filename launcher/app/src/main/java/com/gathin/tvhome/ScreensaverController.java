@@ -89,6 +89,24 @@ final class ScreensaverController {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
+    /**
+     * TCL's DreamManager refuses to bind a third-party dream unless APP_AUTO_START is allowed.
+     * This is a non-standard TCL app-op; unknown ops on other TVs are treated as allowed.
+     */
+    static boolean autoStartAllowed(Context context) {
+        try {
+            android.app.AppOpsManager ops = (android.app.AppOpsManager)
+                    context.getSystemService(Context.APP_OPS_SERVICE);
+            if (ops == null) return true;
+            int uid = context.getPackageManager().getPackageUid(AERIAL_PACKAGE, 0);
+            int mode = ops.checkOpNoThrow("APP_AUTO_START", uid, AERIAL_PACKAGE);
+            return mode != android.app.AppOpsManager.MODE_IGNORED
+                    && mode != android.app.AppOpsManager.MODE_ERRORED;
+        } catch (PackageManager.NameNotFoundException | RuntimeException unknown) {
+            return true;
+        }
+    }
+
     /** True only when AerialViews is the selected component and the screensaver is enabled. */
     static boolean aerialViewsOwnsDream(Context context) {
         if (!isEnabled(context)) return false;
