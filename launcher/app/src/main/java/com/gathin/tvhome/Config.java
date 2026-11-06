@@ -90,6 +90,7 @@ final class Config {
     private static final String NP_DESIGN_V4_KEY = "np_design_v4";
     private static final String NP_DESIGN_V5_KEY = "np_design_v5";
     static final String NP_SIZE_KEY = "np_size";
+    static final String NP_OVERLAY_KEY = "np_overlay";
     /** Default 40 % see-through: the same glass strength as before, now adjustable. */
     static final int GLASS_TRANSPARENCY_DEFAULT = 15;
 
@@ -107,7 +108,7 @@ final class Config {
             SHELF_SHADOW_KEY, HERO_TITLE_KEY, TILE_BORDER_KEY, AMBIENT_MODE_KEY,
             NP_WAVEFORM_KEY, NP_TIMES_KEY, NP_ALBUM_ART_KEY, NP_SOURCE_KEY, NP_CLOSE_KEY,
             NP_VISUAL_MODE_KEY, NP_BG_STYLE_KEY, NP_BG_OPACITY_KEY, NP_ACCENT_KEY,
-            NP_GLOW_KEY, NP_SIZE_KEY, "np_source_text", "np_visualizer", "np_bar_variant",
+            NP_GLOW_KEY, NP_SIZE_KEY, NP_OVERLAY_KEY, "np_source_text", "np_visualizer", "np_bar_variant",
             "np_prev", "np_next", "ambient_now_playing", "ambient_idle_minutes",
             "screensaver_previous")));
 
@@ -401,6 +402,12 @@ final class Config {
     static boolean npSource(Context ctx) {
         return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(NP_SOURCE_KEY, true);
+    }
+
+    /** The compact launcher bar over AerialViews' DreamService (SYSTEM_ALERT_WINDOW). */
+    static boolean npOverlay(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_OVERLAY_KEY, true);
     }
 
     /** 0 = compact, 1 = balanced, 2 = roomy, 3 = large. */

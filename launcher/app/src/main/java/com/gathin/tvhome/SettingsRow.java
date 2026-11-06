@@ -27,6 +27,27 @@ public final class SettingsRow extends TextView {
         lightMode = light;
     }
 
+    /** A chevron for rows that open a dialog; ignored for toggles. */
+    void setChevron(boolean show) {
+        if (show) {
+            setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, R.drawable.ic_chevron, 0);
+            setCompoundDrawablePadding(Math.round(8 * getResources().getDisplayMetrics().density));
+        } else {
+            setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0);
+        }
+    }
+
+    /** A non-Material pill on the right for boolean rows. */
+    void setToggle(boolean on) {
+        setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0,
+                on ? R.drawable.settings_toggle_on : R.drawable.settings_toggle_off, 0);
+        setCompoundDrawablePadding(Math.round(12 * getResources().getDisplayMetrics().density));
+    }
+
+    void clearTrailing() {
+        setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0);
+    }
+
     public SettingsRow(Context context, AttributeSet attrs) {
         super(context, attrs);
         setGravity(Gravity.CENTER_VERTICAL);

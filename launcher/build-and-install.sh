@@ -266,4 +266,8 @@ if [ "$ACK_FOUND" != 1 ]; then
   echo "The launcher is installed and is Home. Check by hand: tools/tv.py 'dumpsys package com.gathin.tvhome' | grep $SECURE" >&2
   exit 1
 fi
+# Optional Now Playing overlay over AerialViews' DreamService. SYSTEM_ALERT_WINDOW is an app-op,
+# not a pm grant; unsupported TVs simply ignore the command. Persist it for the next reboot.
+"$PY" -I ../tools/tv.py "cmd appops set com.gathin.tvhome SYSTEM_ALERT_WINDOW allow 2>/dev/null; appops write-settings 2>/dev/null" >/dev/null 2>&1 || true
+
 echo "Installed. Press Home on the remote to see it."

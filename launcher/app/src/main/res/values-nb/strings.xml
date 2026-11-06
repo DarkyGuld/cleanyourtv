@@ -388,4 +388,6 @@
     <string name="screensaver_auto_start_blocked">Blokkert</string>
     <string name="screensaver_auto_start_hint">kjør adb: appops set com.neilturner.aerialviews APP_AUTO_START allow</string>
     <string name="screensaver_overlay_no_text">Noen apper (f.eks. Spotify TV) legger ut et medievarsel uten tittel/artist-tekst. AerialViews\' Now Playing-overlegg blir da tomt; launcher-linjen leser mediesesjonen og viser fortsatt sangen.</string>
+    <string name="np_overlay_state">AerialViews-overlegg: %1$s</string>
+    <string name="np_overlay_permission">Tillat visning over andre apper</string>
 </resources>

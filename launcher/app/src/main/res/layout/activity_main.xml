@@ -30,6 +30,16 @@
         android:layout_height="match_parent"
         android:alpha="0" />
 
+    <!-- Covers the tops of any next grid row and grounds the icon row like a shelf shadow. -->
+    <View
+        android:id="@+id/bottomFade"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bottom_fade"
+        android:importantForAccessibility="no" />
+
+
     <!-- Race-weekend panel (a theme's race_calendar, see RaceWeekend): in the free space under the clock,
          shown only from shortly before a weekend's first session until the race is over. Updated once a
          minute with the clock, never animated. -->
@@ -407,15 +417,6 @@
                 android:descendantFocusability="afterDescendants" />
         </FrameLayout>
     </LinearLayout>
-
-    <!-- Covers the tops of any next grid row and grounds the icon row like a shelf shadow. -->
-    <View
-        android:id="@+id/bottomFade"
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:layout_gravity="bottom"
-        android:background="@drawable/bottom_fade"
-        android:importantForAccessibility="no" />
 
     <!-- The single floating glass highlight that springs between tiles. -->
     <com.gathin.tvhome.GlassView

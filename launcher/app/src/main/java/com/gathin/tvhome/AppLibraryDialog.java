@@ -83,13 +83,18 @@ final class AppLibraryDialog {
     private final Runnable dismissed;
     private boolean closed;
     private boolean keyboardShown;
+    /** Local view of the Home shortcut state while the library is open; Home is reloaded once on close. */
+    private final Map<String, Boolean> homeState = new HashMap<>();
+    private final Handler changeHandler = new Handler(Looper.getMainLooper());
+    private final Runnable changed;
+    private boolean pendingChange;
+    private final Runnable applyChanged = this::applyPendingChanged;
     /** Only the latest load fills the catalogue, and it shows the popup if an opening is waiting. */
     private final LibraryLoads loads = new LibraryLoads();
     private final Activity activity;
     private final Predicate<String> onHome;
     private final Map<String, String> launchActions;
     private final boolean cinematic;
-    private final Runnable changed;
     private final LinearLayout panel;
     private final boolean reducedMotion;
     private final boolean selectionMode;
@@ -199,6 +204,12 @@ final class AppLibraryDialog {
         popup.setAnimationStyle(0);
         popup.setOnDismissListener(() -> {
             closed = true;
+            changeHandler.removeCallbacks(applyChanged);
+            // Flush the deferred Home reload before the caller dismisses the library.
+            if (pendingChange) {
+                pendingChange = false;
+                changed.run();
+            }
             dismissActions();
             stopHighlight();
             icons.clear();
@@ -316,7 +327,7 @@ final class AppLibraryDialog {
         Map<String, Boolean> home = new HashMap<>();
         for (ResolveInfo app : apps) {
             String pkg = app.activityInfo.packageName;
-            home.put(pkg, onHome.test(pkg));
+            home.put(pkg, isHome(pkg));
         }
         catalogTime = System.currentTimeMillis();
         Collator collator = Collator.getInstance();
@@ -615,9 +626,10 @@ final class AppLibraryDialog {
             Toast.makeText(activity, R.string.library_save_failed, Toast.LENGTH_LONG).show();
             return;
         }
+        homeState.put(app.activityInfo.packageName, add);
         if (selectionMode) {
             updateSelectionFocus(app, add);
-            changed.run();
+            scheduleChanged();
             fill(new ArrayList<>(allApps));
             return;
         }
@@ -636,15 +648,37 @@ final class AppLibraryDialog {
             // Advance through missing shortcuts instead of following the newly checked app
             // into the Home group. Preserve its screen slot when the catalogue is rebuilt.
             int next = LibraryApps.nextFocus(selectedPosition, apps.size(),
-                    index -> !onHome.test(apps.get(index).activityInfo.packageName));
+                    index -> !isHome(apps.get(index).activityInfo.packageName));
             if (next >= 0) {
                 selectedPackage = apps.get(next).activityInfo.packageName;
                 selectedPosition = next;
             }
         }
         dismissActions();
-        changed.run();
+        scheduleChanged();
         refresh();
+    }
+
+    private boolean isHome(String pkg) {
+        Boolean value = homeState.get(pkg);
+        if (value == null) {
+            value = onHome.test(pkg);
+            homeState.put(pkg, value);
+        }
+        return value;
+    }
+
+    private void applyPendingChanged() {
+        if (!closed && pendingChange) {
+            pendingChange = false;
+            changed.run();
+        }
+    }
+
+    private void scheduleChanged() {
+        pendingChange = true;
+        changeHandler.removeCallbacks(applyChanged);
+        changeHandler.postDelayed(applyChanged, 300);
     }
 
     private void updateSelectionFocus(ResolveInfo app, boolean add) {
@@ -708,7 +742,7 @@ final class AppLibraryDialog {
             restoreCardFocus();
         });
         addAction(rows, R.string.library_open, () -> open(app));
-        boolean home = onHome.test(pkg);
+        boolean home = isHome(pkg);
         addAction(rows, home ? R.string.library_remove_shortcut : R.string.library_add_home,
                 () -> changeHome(app, !home));
         Intent info = SystemSettings.appInfo(activity, pkg);
@@ -823,7 +857,7 @@ final class AppLibraryDialog {
             name.setText(label(app));
             name.setEllipsize(TextUtils.TruncateAt.END);
             TextView status = holder.itemView.findViewById(R.id.status);
-            boolean home = onHome.test(pkg);
+            boolean home = isHome(pkg);
             boolean recent = !selectionMode && LibraryApps.recent(installTimes.getOrDefault(pkg, 0L), catalogTime);
             status.setText(home ? R.string.library_on_home : recent ? R.string.library_recent : R.string.library_add_home);
             status.setVisibility(home || !okOpens ? View.VISIBLE : View.INVISIBLE);
@@ -835,7 +869,7 @@ final class AppLibraryDialog {
             else check.setBackground(surface(0xFF70D9A0, 8));
             check.setVisibility(home || recent ? View.VISIBLE : View.GONE);
             holder.itemView.setOnClickListener(v -> {
-                boolean onHomeNow = onHome.test(pkg);
+                boolean onHomeNow = isHome(pkg);
                 if (LibraryApps.okOpens(selectionMode, okOpens, onHomeNow)) open(app);
                 else changeHome(app, !onHomeNow);
             });
@@ -843,7 +877,7 @@ final class AppLibraryDialog {
             holder.itemView.setOnFocusChangeListener((v, focused) -> {
                 if (focused) {
                     selectedPackage = pkg;
-                    instructions.setText(hint(onHome.test(pkg)));
+                    instructions.setText(hint(isHome(pkg)));
                     v.post(() -> { if (v.hasFocus() && catalog != null) highlight(v, true); });
                     int index = holder.getBindingAdapterPosition();
                     if (index != RecyclerView.NO_POSITION) selectedPosition = index;

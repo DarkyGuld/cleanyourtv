@@ -580,6 +580,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         root = findViewById(R.id.root);
         root.setBackgroundColor(cfg.backgroundColor);
+        // Keeps the compact bar ready for AerialViews' DreamService; it never draws over Home.
+        try {
+            startService(new Intent(this, NowPlayingOverlayService.class));
+        } catch (RuntimeException ignored) {
+        }
         // root fills the window with an opaque colour (Config keeps background_color opaque), so the window's own
         // black under it is a second full-screen fill on every frame for nothing. The starting window still uses
         // the theme's background, so launch looks the same.
@@ -658,6 +663,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         stats = findViewById(R.id.stats);
         raceCalendar = cfg.raceCalendar;
         racePanel = findViewById(R.id.racePanel);
+        if (racePanel != null && clockBlock != null) {
+            clockBlock.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> positionRacePanel());
+            root.post(this::positionRacePanel);
+        }
         raceKicker = findViewById(R.id.raceKicker);
         raceHeadline = findViewById(R.id.raceHeadline);
         raceSessions = findViewById(R.id.raceSessions);
@@ -915,7 +924,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
                     int shift = rv.canScrollVertically(-1) ? rv.computeVerticalScrollOffset() : 0;
                     racePanel.setTranslationY(-shift);
-                    int room = Math.max(1, racePanel.getTop() - clockBlock.getBottom());
+                    int room = Math.max(1, (int) racePanel.getY() - clockBlock.getBottom());
                     racePanel.setAlpha(Math.max(0f, 1f - shift / (float) room));
                 }
             });
@@ -1599,6 +1608,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         if (topShelf != null) topShelf.stop();
         if (nowPlaying != null) nowPlaying.stop();
+        stopService(new Intent(this, NowPlayingOverlayService.class));
         if (iconDialog != null) iconDialog.dismiss();
         if (moveHintToast != null) moveHintToast.cancel();
         RemoteKeys.release(this);
@@ -3397,6 +3407,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      * The race panel's place under the clock. With game_day off it is exactly the F1 panel (updateRace). With it on,
      * each team's next game takes a turn there, and the theme's F1 weekend is one more turn drawn as today.
      */
+    /** Race panel sits below the real header, not at the old fixed 158 dp. */
+    private void positionRacePanel() {
+        if (racePanel == null || clockBlock == null || racePanel.getParent() == null) return;
+        int target = clockBlock.getBottom() + dp(8);
+        if (Math.abs(racePanel.getY() - target) > 1) racePanel.setY(target);
+    }
+
     private void updatePanel() {
         if (gameDay == null) {
             updateRace();
@@ -4900,11 +4917,27 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private void showIconPackDialog() {
-        java.util.List<IconPacks.Pack> packs = IconPacks.installed(this);
+        IconPacks.installedAsync(this, found ->
+                runOnUiThread(() -> showIconPackDialog(new java.util.ArrayList<>(found))));
+    }
+
+    private void showIconPackDialog(java.util.List<IconPacks.Pack> packs) {
+        String current = Config.iconPack(this);
+        boolean currentListed = false;
+        for (IconPacks.Pack pack : packs) currentListed |= pack.pkg.equals(current);
+        if (!current.isEmpty() && !currentListed) {
+            String label;
+            try {
+                PackageManager pm = getPackageManager();
+                label = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(current, 0)));
+            } catch (PackageManager.NameNotFoundException missing) {
+                label = current;
+            }
+            packs.add(new IconPacks.Pack(current, label));
+        }
         String[] labels = new String[packs.size() + 1];
         labels[0] = getString(R.string.icon_pack_none);
         int checked = 0;
-        String current = Config.iconPack(this);
         for (int i = 0; i < packs.size(); i++) {
             labels[i + 1] = packs.get(i).label;
             if (packs.get(i).pkg.equals(current)) checked = i + 1;

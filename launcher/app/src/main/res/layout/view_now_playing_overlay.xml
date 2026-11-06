@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/overlayBar"
+    android:layout_width="match_parent"
+    android:layout_height="96dp"
+    android:layout_marginStart="56dp"
+    android:layout_marginEnd="56dp"
+    android:background="@drawable/now_playing_overlay_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="14dp"
+    android:paddingEnd="18dp">
+
+    <ImageView
+        android:id="@+id/overlayArt"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:background="@drawable/now_playing_cover_bg"
+        android:clipToOutline="true"
+        android:importantForAccessibility="no"
+        android:outlineProvider="background"
+        android:scaleType="centerCrop" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/overlayTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="@string/font_medium"
+            android:singleLine="true"
+            android:textColor="#FFFFFFFF"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/overlayArtist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="@string/font_regular"
+            android:singleLine="true"
+            android:textColor="#B3FFFFFF"
+            android:textSize="12sp" />
+
+        <ProgressBar
+            android:id="@+id/overlayProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:layout_marginTop="7dp"
+            android:indeterminate="false"
+            android:max="1000"
+            android:progressBackgroundTint="#33FFFFFF"
+            android:progressTint="#FFFFFFFF" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/overlayTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:fontFamily="monospace"
+        android:textColor="#CCFFFFFF"
+        android:textSize="11sp" />
+</LinearLayout>

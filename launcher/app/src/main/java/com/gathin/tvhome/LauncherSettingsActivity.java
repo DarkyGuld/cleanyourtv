@@ -36,7 +36,7 @@ public final class LauncherSettingsActivity extends Activity {
     private SharedPreferences choices;
     private final TextView[] columnChoices = new TextView[4];
     private final TextView[] rowChoices = new TextView[4];
-    private static final int[] DOCK_OPACITIES = {100, 70, 50, 30};
+    private static final int[] DOCK_OPACITIES = {100, 80, 70, 60, 50, 30};
     private final TextView[] dockChoices = new TextView[DOCK_OPACITIES.length];
     private static final String[] CLOCK_FORMATS = {"system", "12", "24"};
     private final TextView[] clockChoices = new TextView[CLOCK_FORMATS.length];
@@ -75,6 +75,7 @@ public final class LauncherSettingsActivity extends Activity {
     private TextView aerialViewsChoice;
     private TextView screensaverStatusChoice;
     private TextView screensaverAutoStartChoice;
+    private TextView npOverlayChoice;
     private TextView screensaverTestChoice;
     private TextView screensaverNotificationChoice;
     private TextView screensaverOverlayChoice;
@@ -174,7 +175,7 @@ public final class LauncherSettingsActivity extends Activity {
                 refresh();
             });
         }
-        int[] dockIds = {R.id.dock100, R.id.dock70, R.id.dock50, R.id.dock30};
+        int[] dockIds = {R.id.dock100, R.id.dock80, R.id.dock70, R.id.dock60, R.id.dock50, R.id.dock30};
         for (int i = 0; i < dockIds.length; i++) {
             final int value = DOCK_OPACITIES[i];
             dockChoices[i] = findViewById(dockIds[i]);
@@ -314,6 +315,17 @@ public final class LauncherSettingsActivity extends Activity {
         aerialViewsChoice.setOnClickListener(v -> showScreensaverPicker());
         screensaverStatusChoice = findViewById(R.id.screensaverStatusChoice);
         screensaverAutoStartChoice = findViewById(R.id.screensaverAutoStartChoice);
+        npOverlayChoice = findViewById(R.id.npOverlayChoice);
+        npOverlayChoice.setOnClickListener(v -> {
+            if (!Settings.canDrawOverlays(this)) {
+                open(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:" + getPackageName())));
+                return;
+            }
+            choices.edit().putBoolean(Config.NP_OVERLAY_KEY, !Config.npOverlay(this)).apply();
+            changed();
+            refresh();
+        });
         screensaverTestChoice = findViewById(R.id.screensaverTestChoice);
         screensaverTestChoice.setOnClickListener(v -> {
             Toast.makeText(this, R.string.screensaver_test_started, Toast.LENGTH_SHORT).show();
@@ -939,7 +951,11 @@ public final class LauncherSettingsActivity extends Activity {
     }
 
     private void showInstalledIconPackPicker() {
-        java.util.List<IconPacks.Pack> packs = new java.util.ArrayList<>(IconPacks.installed(this));
+        IconPacks.installedAsync(this, found ->
+                runOnUiThread(() -> showInstalledIconPackDialog(new java.util.ArrayList<>(found))));
+    }
+
+    private void showInstalledIconPackDialog(java.util.List<IconPacks.Pack> packs) {
         String current = Config.iconPack(this);
         boolean currentListed = false;
         for (IconPacks.Pack pack : packs) currentListed |= pack.pkg.equals(current);
@@ -1276,6 +1292,10 @@ public final class LauncherSettingsActivity extends Activity {
                 getString(autoStart ? R.string.screensaver_auto_start_allowed
                         : R.string.screensaver_auto_start_blocked))
                 + (autoStart ? "" : " · " + getString(R.string.screensaver_auto_start_hint)));
+        boolean overlayAllowed = Settings.canDrawOverlays(this);
+        npOverlayChoice.setText(getString(R.string.np_overlay_state,
+                getString(Config.npOverlay(this) ? R.string.on : R.string.off))
+                + (overlayAllowed ? "" : " · " + getString(R.string.np_overlay_permission)));
         screensaverTestChoice.setText(R.string.screensaver_test);
         boolean notificationAccess = ScreensaverController.notificationAccessEnabled(this);
         screensaverNotificationChoice.setText(getString(R.string.screensaver_notification_state,
@@ -1412,6 +1432,51 @@ public final class LauncherSettingsActivity extends Activity {
         followThemeChoice.setText(getString(R.string.follow_theme)
                 + (choicesAvailable ? "" : " · " + getString(R.string.no_local_choices)));
         setRowEnabled(followThemeChoice, choicesAvailable);
+        decorateRows();
+    }
+
+    /** Adds a chevron to action rows and a pill to boolean rows without changing the text API. */
+    private void decorateRows() {
+        View content = findViewById(R.id.settingsContent);
+        if (content instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) content;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child instanceof SettingsRow) {
+                    SettingsRow row = (SettingsRow) child;
+                    if (row.isEnabled() && row.isClickable()) row.setChevron(true);
+                    else row.clearTrailing();
+                }
+            }
+        }
+        toggle(liquidGlassChoice, Config.liquidGlass(this));
+        toggle(topShelfNowPlayingChoice, Config.topShelfNowPlaying(this));
+        toggle(topShelfProgressChoice, Config.topShelfProgress(this));
+        toggle(topShelfAutoHideChoice, Config.topShelfAutoHide(this));
+        toggle(nowPlayingFullChoice, Config.nowPlayingFull(this));
+        toggle(npWaveformChoice, Config.npWaveform(this));
+        toggle(npTimesChoice, Config.npTimes(this));
+        toggle(npAlbumArtChoice, Config.npAlbumArt(this));
+        toggle(npSourceBadgeChoice, Config.npSource(this));
+        toggle(npCloseChoice, Config.npClose(this));
+        toggle(smartStackChoice, Config.smartStack(this));
+        toggle(editJiggleChoice, Config.editJiggle(this));
+        toggle(topBarCapsuleChoice, Config.topBarCapsule(this));
+        toggle(shelfShadowChoice, Config.shelfShadow(this));
+        toggle(tileBorderChoice, Config.tileBorder(this));
+        toggle(controlCenterChoice, Config.controlCenter(this));
+        toggle(screensaverMediaChoice, Config.screensaverMedia(this));
+        toggle(mediaBackgroundChoice, Config.mediaBackground(this));
+        toggle(npOverlayChoice, Config.npOverlay(this));
+        toggle(animationsChoice, animations);
+        toggle(advancedChoice, advancedEffects);
+        toggle(screensaverNotificationChoice, ScreensaverController.notificationAccessEnabled(this));
+    }
+
+    private void toggle(View row, boolean on) {
+        if (!(row instanceof SettingsRow)) return;
+        if (row.isEnabled()) ((SettingsRow) row).setToggle(on);
+        else ((SettingsRow) row).clearTrailing();
     }
 
     /** Clears every on-TV choice through Config's one shared registry. */
