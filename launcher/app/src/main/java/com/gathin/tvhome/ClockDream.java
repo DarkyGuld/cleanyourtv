@@ -22,8 +22,11 @@ public class ClockDream extends DreamService {
         // Start with the wallpaper/glow at once; the media session is read off the main thread.
         scene.useHomeWallpaper(this);
         scene.loadMediaArt(this, media -> {
-            if (media == null || media.bitmap == null) return;
-            scene.useMediaArt(media.bitmap);
+            if (media == null) return;
+            if (Config.screensaverMedia(this) && media.bitmap != null) {
+                scene.useMediaArt(media.bitmap);
+            }
+            if (!Config.screensaverClockSong(this)) return;
             android.widget.TextView mediaTitle = findViewById(R.id.dreamMediaTitle);
             if (mediaTitle != null) {
                 String text = media.title == null ? "" : media.title;

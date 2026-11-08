@@ -12,6 +12,14 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class RemoteKeysTest {
+    @Test public void keyFilterFlagTurnsOnAndOffWithoutLosingOtherFlags() {
+        int filter = android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        int other = 0x40;
+        assertEquals(filter | other, RemoteKeys.filterFlags(other, true));
+        assertEquals(other, RemoteKeys.filterFlags(filter | other, false));
+        assertEquals(filter, RemoteKeys.filterFlags(filter, true));
+        assertEquals(0, RemoteKeys.filterFlags(0, false));
+    }
     // Key names resolved by a stand-in: android.view.KeyEvent isn't available in JVM tests.
     private static int keyCode(String name) {
         if (name.equals("KEYCODE_BUTTON_3")) return 190;

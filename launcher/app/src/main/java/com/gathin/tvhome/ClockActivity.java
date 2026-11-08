@@ -41,8 +41,11 @@ public class ClockActivity extends Activity {
         scene.useHomeWallpaper(this);
         scene.loadMediaArt(this, media -> {
             if (isFinishing() || isDestroyed()) return;
-            if (media == null || media.bitmap == null) return;
-            scene.useMediaArt(media.bitmap);
+            if (media == null) return;
+            if (Config.screensaverMedia(this) && media.bitmap != null) {
+                scene.useMediaArt(media.bitmap);
+            }
+            if (!Config.screensaverClockSong(this)) return;
             TextView mediaTitle = findViewById(R.id.dreamMediaTitle);
             if (mediaTitle != null) {
                 String text = media.title == null ? "" : media.title;

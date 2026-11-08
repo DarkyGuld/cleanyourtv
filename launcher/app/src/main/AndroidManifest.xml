@@ -41,6 +41,12 @@
             <action android:name="android.settings.DISPLAY_SETTINGS" />
         </intent>
         <intent>
+            <action android:name="android.settings.BLUETOOTH_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.VPN_SETTINGS" />
+        </intent>
+        <intent>
             <action android:name="android.settings.MANAGE_APPLICATIONS_SETTINGS" />
         </intent>
         <!-- The tile menu and the app library offer App info only where this resolves (SystemSettings.appInfo). -->
@@ -72,6 +78,9 @@
         <intent><action android:name="com.novalauncher.THEME" /></intent>
         <intent><action android:name="com.anddoes.launcher.THEME" /></intent>
         <intent><action android:name="com.teslacoilsw.launcher.THEME" /></intent>
+        <!-- Any installed DreamService, so Restore TV default can see the firmware's own
+             screensaver (Backdrop) even when it has no launcher activity. -->
+        <intent><action android:name="android.service.dreams.DreamService" /></intent>
         <!-- AerialViews/Clock: resolve the system settings pages used by the screensaver section. -->
         <intent><action android:name="android.settings.DREAM_SETTINGS" /></intent>
         <intent><action android:name="android.settings.NOTIFICATION_LISTENER_SETTINGS" /></intent>
@@ -226,6 +235,17 @@
         <service
             android:name=".ClockDream"
             android:label="@string/dream_name"
+            android:exported="true"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".NowPlayingDream"
+            android:label="@string/dream_player_name"
             android:exported="true"
             android:permission="android.permission.BIND_DREAM_SERVICE">
             <intent-filter>

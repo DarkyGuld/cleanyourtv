@@ -178,7 +178,7 @@ final class ClockScene {
             wallpaperExecutor.execute(() -> {
                 MediaArt.Entry entry = null;
                 try {
-                    entry = Config.screensaverMedia(context) ? MediaArt.current(context) : null;
+                    entry = MediaArt.current(context);
                 } catch (RuntimeException ignored) {
                 }
                 final MediaArt.Entry result = entry;

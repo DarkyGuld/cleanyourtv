@@ -8,7 +8,9 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.graphics.Outline;
 import android.graphics.drawable.GradientDrawable;
+import android.view.ViewOutlineProvider;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
@@ -51,29 +53,34 @@ final class NowPlaying {
     private final Runnable focusDock;
     private final Visibility visibility;
     private final BarSettings barSettings;
-    private final View card;
-    private final View open;
-    private final ImageView artwork;
-    private final TextView title;
-    private final TextView subtitle;
-    private final View coverBox;
-    private final View artFrame;
-    private final View trackInfo;
-    private final RadialAuraView aura;
-    private final TextView elapsed;
-    private final TextView duration;
-    private final WaveformSeekBar waveform;
-    private final SyntheticVisualizerSource visualSource = new SyntheticVisualizerSource();
+    private final FrameLayout rootView;
+    private NowPlayingBar card;
+    private View open;
+    private ImageView artwork;
+    private TextView title;
+    private TextView subtitle;
+    private View coverBox;
+    private View artFrame;
+    private View trackInfo;
+    private RadialAuraView aura;
+    private TextView elapsed;
+    private TextView duration;
+    private WaveformSeekBar waveform;
+    private SyntheticVisualizerSource visualSource = new SyntheticVisualizerSource();
     private final GradientDrawable barBackground = new GradientDrawable();
     private final int[] gradientColors = new int[2];
-    private final ImageButton previous;
-    private final ImageButton play;
-    private final ImageButton next;
-    private final ImageButton fullscreen;
-    private final ImageButton close;
-    private final LinearLayout controls;
-    private final ImageView sourceBadge;
-    private final View coverFocus;
+    private ImageButton previous;
+    private ImageButton play;
+    private ImageButton next;
+    private ImageButton fullscreen;
+    private ImageButton close;
+    private LinearLayout controls;
+    private ImageView sourceBadge;
+    private View coverFocus;
+    private View progressRow;
+    private View mainPanel;
+    private int appliedVariant = -1;
+    private int coverWidth;
     interface ArtworkListener { void onArtwork(Bitmap bitmap); }
     private static final long METADATA_GRACE_MS = 900L;
     private ArtworkListener artworkListener;
@@ -95,7 +102,6 @@ final class NowPlaying {
     private long seekPreviewUntil;
     private long pendingSeekMs = -1;
     private float dockTop = -1f;
-    private boolean dockScrolled;
     private int barHeight;
     private String lastTitle;
     private String lastMediaKey;
@@ -168,19 +174,34 @@ final class NowPlaying {
         this.focusDock = focusDock;
         this.barSettings = barSettings;
         this.visibility = visibility;
-        card = LayoutInflater.from(activity).inflate(R.layout.view_now_playing, null, false);
+        rootView = activity.findViewById(R.id.root);
         barBackground.setShape(GradientDrawable.RECTANGLE);
-        barBackground.setCornerRadius(dp(18));
-        card.setBackground(barBackground);
-        card.setOnLongClickListener(v -> openFullScreen());
-        FrameLayout root = activity.findViewById(R.id.root);
+        sessions = (MediaSessionManager) activity.getSystemService(android.content.Context.MEDIA_SESSION_SERVICE);
+        listener = new ComponentName(activity, GuardRevival.class);
+        buildBar();
+        applyConfig();
+        wireControls();
+    }
+
+    /** Inflates the chosen bar variant. Both layouts carry the same IDs, so the rest of the class is shared. */
+    private void buildBar() {
+        int variant = Config.npBarVariant(activity);
+        int layout = variant == Config.NP_BAR_EDGE
+                ? R.layout.view_now_playing_edge : R.layout.view_now_playing;
+        card = (NowPlayingBar) LayoutInflater.from(activity).inflate(layout, null, false);
+        card.setBackground(null);
+        card.setClipToOutline(true);
         // The same width as the dock band: the bar sits directly above it and lines up with the app row.
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         params.leftMargin = dp(56);
         params.rightMargin = dp(56);
-        // The bar stays above the dock row, in front of the grid.
-        root.addView(card, params);
+        rootView.addView(card, params);
+        bindViews();
+        appliedVariant = variant;
+    }
+
+    private void bindViews() {
         open = card.findViewById(R.id.npOpen);
         artwork = card.findViewById(R.id.npArtwork);
         title = card.findViewById(R.id.npTitle);
@@ -192,17 +213,24 @@ final class NowPlaying {
         elapsed = card.findViewById(R.id.npElapsed);
         duration = card.findViewById(R.id.npDuration);
         waveform = card.findViewById(R.id.npWaveform);
+        progressRow = card.findViewById(R.id.npProgress);
+        mainPanel = card.findViewById(R.id.npMain);
         waveform.setOnSeekListener(progress -> {
             if (active == null || durationMs <= 0) return;
             long target = (long) (durationMs * progress);
             seekPreviewMs = target;
-            seekPreviewUntil = SystemClock.elapsedRealtime() + 900;
+            // Some players acknowledge a seek a second late. Keep the thumb at the target until
+            // the session catches up instead of snapping back to the old position.
+            seekPreviewUntil = SystemClock.elapsedRealtime() + 1600;
             elapsed.setText(format(target));
             pendingSeekMs = target;
             handler.removeCallbacks(sendSeek);
             handler.postDelayed(sendSeek, 80);
         });
         waveform.setSource(visualSource);
+        // A single OK press on the full-width timeline toggles playback, as on a TV soundbar.
+        waveform.setClickable(true);
+        waveform.setOnClickListener(v -> toggle());
         previous = card.findViewById(R.id.npPrev);
         play = card.findViewById(R.id.npPlay);
         next = card.findViewById(R.id.npNext);
@@ -211,11 +239,34 @@ final class NowPlaying {
         controls = card.findViewById(R.id.npControls);
         sourceBadge = card.findViewById(R.id.npSourceBadge);
         coverFocus = card.findViewById(R.id.npCoverFocus);
-        sessions = (MediaSessionManager) activity.getSystemService(android.content.Context.MEDIA_SESSION_SERVICE);
-        listener = new ComponentName(activity, GuardRevival.class);
+        card.setOnBarLongPress(() -> {
+            if (barSettings != null) barSettings.show(card);
+        });
+        // A cold start can post the first position before the bar has a height; re-apply it once
+        // the layout exists so the bar cannot stay at the root's top edge.
+        card.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (b - t > 0) position();
+        });
         title.setSelected(true);   // marquee when the title overflows
+    }
+
+    /** Replaces only the bar skeleton when the owner switches Stacked/Edge; media state stays here. */
+    private void rebuildBar() {
+        boolean wasVisible = visible;
+        boolean hadFocus = card != null && card.hasFocus();
+        if (card != null) rootView.removeView(card);
+        buildBar();
         applyConfig();
         wireControls();
+        if (active != null) update();
+        card.setVisibility(wasVisible ? View.VISIBLE : View.GONE);
+        if (wasVisible) {
+            card.setAlpha(1f);
+            card.setTranslationY(0f);
+            setBarFocusable(true);
+            position();
+            if (hadFocus) play.requestFocus();
+        }
     }
 
     /** Reads the bar's per-part switches; called at start too, so a Home rebuild is never required. */
@@ -228,6 +279,9 @@ final class NowPlaying {
         duration.setVisibility(times);
         sourceBadge.setVisibility(Config.npSource(activity) && Config.npAlbumArt(activity)
                 ? View.VISIBLE : View.GONE);
+        previous.setVisibility(Config.npPrev(activity) ? View.VISIBLE : View.GONE);
+        next.setVisibility(Config.npNext(activity) ? View.VISIBLE : View.GONE);
+        updateProgressRow((times != View.GONE));
         int visualMode = Config.npVisualMode(activity);
         waveform.setMode(visualMode);
         waveform.setGlow(Config.npGlow(activity));
@@ -244,12 +298,58 @@ final class NowPlaying {
         boolean closable = Config.npClose(activity);
         fullscreen.setVisibility(full ? View.VISIBLE : View.GONE);
         close.setVisibility(closable ? View.VISIBLE : View.GONE);
-        // Only the visible buttons are in the right-hand focus chain.
-        next.setNextFocusRightId(full ? R.id.npFullscreen : closable ? R.id.npClose : R.id.npNext);
-        fullscreen.setNextFocusLeftId(R.id.npNext);
-        fullscreen.setNextFocusRightId(closable ? R.id.npClose : R.id.npFullscreen);
-        close.setNextFocusLeftId(full ? R.id.npFullscreen : R.id.npNext);
-        close.setNextFocusRightId(R.id.npClose);
+        updateFocusChain(full, closable);
+    }
+
+    /** The Edge variant puts the progress row on the bottom edge; Stacked keeps it in the middle. */
+    private void updateProgressRow(boolean timesVisible) {
+        if (progressRow == null) return;
+        // Both variants share the same full-width bottom timeline. Keep it when only the
+        // timestamps are on, so the elapsed/total labels remain visible.
+        boolean any = Config.npWaveform(activity) || timesVisible;
+        progressRow.setVisibility(any ? View.VISIBLE : View.GONE);
+    }
+
+    /** Only visible controls are in the D-pad chain; hidden Previous/Next must not trap focus. */
+    private void updateFocusChain(boolean full, boolean closable) {
+        boolean prev = Config.npPrev(activity);
+        boolean nextVisible = Config.npNext(activity);
+        int first = prev ? R.id.npPrev : R.id.npPlay;
+        open.setNextFocusRightId(first);
+        open.setNextFocusDownId(R.id.npWaveform);
+        if (prev) {
+            previous.setNextFocusLeftId(R.id.npOpen);
+            previous.setNextFocusRightId(R.id.npPlay);
+        }
+        play.setNextFocusLeftId(prev ? R.id.npPrev : R.id.npOpen);
+        play.setNextFocusDownId(R.id.npWaveform);
+        play.setNextFocusUpId(R.id.npOpen);
+        if (prev) previous.setNextFocusDownId(R.id.npWaveform);
+        if (nextVisible) next.setNextFocusDownId(R.id.npWaveform);
+        int right = nextVisible ? R.id.npNext
+                : full ? R.id.npFullscreen : closable ? R.id.npClose : R.id.npOpen;
+        play.setNextFocusRightId(right);
+        if (nextVisible) {
+            next.setNextFocusLeftId(R.id.npPlay);
+            next.setNextFocusRightId(full ? R.id.npFullscreen : closable ? R.id.npClose : R.id.npOpen);
+        }
+        int after = prev ? R.id.npNext : R.id.npPlay;
+        fullscreen.setNextFocusLeftId(after);
+        fullscreen.setNextFocusRightId(closable ? R.id.npClose : R.id.npOpen);
+        fullscreen.setNextFocusDownId(R.id.npWaveform);
+        close.setNextFocusLeftId(full ? R.id.npFullscreen : after);
+        close.setNextFocusRightId(R.id.npOpen);
+        close.setNextFocusDownId(R.id.npWaveform);
+        // The full-width timeline is the bottom row; Up returns to the transport, and Down
+        // from Play drops into the timeline for seeking.
+        if (waveform != null) waveform.setNextFocusUpId(R.id.npPlay);
+        play.setNextFocusDownId(R.id.npWaveform);
+        play.setNextFocusUpId(R.id.npOpen);
+    }
+
+    private void focusFirstControl() {
+        if (Config.npPrev(activity) && previous.isShown()) previous.requestFocus();
+        else play.requestFocus();
     }
 
     /** Compact, balanced, roomy or large: one layout, no view recreation. */
@@ -261,7 +361,9 @@ final class NowPlaying {
             cardLp.height = height;
             card.setLayoutParams(cardLp);
         }
-        int cover = dp(size == 0 ? 96 : size == 1 ? 112 : size == 2 ? 128 : 144);
+        boolean edge = Config.npBarVariant(activity) == Config.NP_BAR_EDGE;
+        int cover = dp(heights[size]);
+        coverWidth = cover;
         ViewGroup.LayoutParams boxLp = coverBox.getLayoutParams();
         if (boxLp.width != cover || boxLp.height != ViewGroup.LayoutParams.MATCH_PARENT) {
             boxLp.width = cover;
@@ -311,27 +413,62 @@ final class NowPlaying {
     /** Background style/opacity/accent/glow, changed live without recreating the view. */
     private void applyBackground() {
         int style = Config.npBackgroundStyle(activity);
-        int alpha = Math.round(Config.npBackgroundOpacity(activity) * 2.55f);
-        barBackground.setCornerRadius(dp(18));
+        // The bar floats over the app grid: a low opacity lets bright app tiles show through
+        // the transport controls as soon as the grid scrolls behind it. Keep the glass tint,
+        // but never below a readable floor.
+        int alpha = Math.max(235, Math.round(Config.npBackgroundOpacity(activity) * 2.55f));
+        applyCornerRadius(Config.npCornerRadius(activity));
         if (style == 0) {
             gradientColors[0] = 0x00000000;
             gradientColors[1] = 0x00000000;
             barBackground.setColors(gradientColors);
             barBackground.setStroke(Math.max(1, dp(1)), 0x14FFFFFF);
         } else if (style == 2) {
-            gradientColors[0] = (alpha << 24) | 0x101116;
-            gradientColors[1] = (alpha << 24) | 0x101116;
+            gradientColors[0] = (Math.min(alpha, 245) << 24) | 0x101116;
+            gradientColors[1] = (Math.min(alpha, 235) << 24) | 0x101116;
             barBackground.setColors(gradientColors);
             barBackground.setStroke(Math.max(1, dp(1)), 0x14FFFFFF);
         } else {
-            int top = (Math.min(alpha, 230) << 24) | 0x14151C;
-            int bottom = (Math.min(alpha, 200) << 24) | 0x0D0E13;
+            int top = (Math.min(alpha, 245) << 24) | 0x14151C;
+            int bottom = (Math.min(alpha, 235) << 24) | 0x0D0E13;
             gradientColors[0] = top;
             gradientColors[1] = bottom;
             barBackground.setColors(gradientColors);
             barBackground.setStroke(Math.max(1, dp(1)), Math.min(0x33, alpha / 3) << 24 | 0xFFFFFF);
         }
-        card.setBackground(barBackground);
+        if (mainPanel != null) mainPanel.setBackground(barBackground);
+    }
+
+    /** Both ends of the bar and the cover's left corners use the same radius. */
+    private void applyCornerRadius(int radiusDp) {
+        int radius = dp(radiusDp);
+        barBackground.setCornerRadius(radius);
+        if (artFrame == null) return;
+        GradientDrawable cover = new GradientDrawable();
+        cover.setColor(Color.TRANSPARENT);
+        cover.setCornerRadii(new float[]{radius, radius, 0, 0, 0, 0, radius, radius});
+        artFrame.setBackground(cover);
+        artFrame.setClipToOutline(true);
+        if (progressRow != null) {
+            GradientDrawable scrim = new GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{0x00000000, 0xCC000000});
+            scrim.setCornerRadii(new float[]{0, 0, 0, 0, radius, radius, radius, radius});
+            progressRow.setBackground(scrim);
+        }
+        // clipToOutline alone can fall back to a square outline when the background is replaced
+        // at runtime; an explicit rounded outline keeps both ends identical.
+        if (card != null) card.setCornerRadius(radius);
+        if (mainPanel != null) {
+            mainPanel.setClipToOutline(true);
+            mainPanel.setBackground(barBackground);
+            mainPanel.setOutlineProvider(new ViewOutlineProvider() {
+                @Override public void getOutline(View view, Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+                }
+            });
+            mainPanel.invalidateOutline();
+        }
     }
 
     private void wireControls() {
@@ -349,7 +486,7 @@ final class NowPlaying {
         });
         open.setOnKeyListener((v, key, event) -> {
             if (event.getAction() == KeyEvent.ACTION_DOWN && key == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                previous.requestFocus();
+                focusFirstControl();
                 return true;
             }
             return leaveKey(key, event);
@@ -357,17 +494,26 @@ final class NowPlaying {
         waveform.setOnKeyListener((v, key, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
+                focusDock.run();
+                return true;
+            }
+            if (key == KeyEvent.KEYCODE_DPAD_UP) {
                 play.requestFocus();
                 return true;
             }
-            return leaveKey(key, event);
+            return false;   // Left/Right seek; Back is handled by the activity bar.
         });
         play.setOnKeyListener((v, key, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN && key == KeyEvent.KEYCODE_DPAD_UP) {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (key == KeyEvent.KEYCODE_DPAD_UP) {
+                open.requestFocus();
+                return true;
+            }
+            if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
                 waveform.requestFocus();
                 return true;
             }
-            return leaveKey(key, event);
+            return false;   // Left/Right use the explicit Previous/Next focus chain.
         });
         previous.setOnKeyListener((v, key, event) -> leaveKey(key, event));
         next.setOnKeyListener((v, key, event) -> leaveKey(key, event));
@@ -397,13 +543,8 @@ final class NowPlaying {
         for (View v : new View[]{waveform, previous, play, next, fullscreen, close, open}) {
             v.setFocusableInTouchMode(false);
         }
-        open.setNextFocusRightId(R.id.npPrev);
-        previous.setNextFocusLeftId(R.id.npOpen);
-        previous.setNextFocusRightId(R.id.npPlay);
-        play.setNextFocusLeftId(R.id.npPrev);
-        play.setNextFocusRightId(R.id.npNext);
         waveform.setNextFocusDownId(R.id.npPlay);
-        next.setNextFocusLeftId(R.id.npPlay);
+        // The rest of the chain depends on which buttons are visible; applyConfig() owns it.
     }
 
     /** Up from the bar goes to the top pills, Down back to the dock. */
@@ -411,10 +552,6 @@ final class NowPlaying {
         if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
         if (key == KeyEvent.KEYCODE_DPAD_UP) {
             focusTop.run();
-            return true;
-        }
-        if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
-            focusDock.run();
             return true;
         }
         if (key == KeyEvent.KEYCODE_BACK) {
@@ -571,6 +708,10 @@ final class NowPlaying {
 
     /** Applies a change made in the bar's settings popup without recreating Home. */
     void refreshConfig() {
+        if (Config.npBarVariant(activity) != appliedVariant) {
+            rebuildBar();
+            return;
+        }
         applyConfig();
         position();
         refreshGlass();
@@ -585,9 +726,9 @@ final class NowPlaying {
     boolean focus() {
         if (!isVisible() || card.getVisibility() != View.VISIBLE) return false;
         showControls();
-        // Up from the dock lands on the progress bar, so Left/Right can scrub immediately.
-        if (waveform.getVisibility() == View.VISIBLE) waveform.requestFocus();
-        else play.requestFocus();
+        // Start on Play so Up/Down and Left/Right can reach every transport button; Down
+        // reaches the full-width timeline for seeking.
+        play.requestFocus();
         return true;
     }
 
@@ -773,8 +914,14 @@ final class NowPlaying {
             }
         }
         Bitmap shownArt = scaledCover != null ? scaledCover : bitmap;
-        if (shownArt != null) artwork.setImageBitmap(shownArt);
-        else artwork.setImageDrawable(appIcon(chosen.getPackageName()));
+        if (shownArt != null) {
+            artwork.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            artwork.setImageBitmap(shownArt);
+        } else {
+            // An app icon is often a wide banner; cropping it to the square cover can cut the logo out.
+            artwork.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            artwork.setImageDrawable(appIcon(chosen.getPackageName()));
+        }
         if (artworkListener != null && shownArt != lastSentArt) {
             lastSentArt = shownArt;
             artworkListener.onArtwork(shownArt);
@@ -943,14 +1090,15 @@ final class NowPlaying {
             card.animate().cancel();
             card.setVisibility(View.VISIBLE);
             card.setAlpha(1f);
-            card.setTranslationY(0f);
             showControls();
             startTicking();
             notifyVisibility(true);
             if (!wasVisible) {
                 refreshGlass();
-                card.setTranslationY(dp(12));
-                card.animate().translationY(0f).setDuration(240).start();
+                // Position is owned by position(); animate only the alpha so an update can
+                // never snap the bar back to its layout origin (the top of the screen).
+                card.setAlpha(0f);
+                card.animate().alpha(1f).setDuration(200).start();
             }
         } else {
             setBarFocusable(false);
@@ -996,42 +1144,45 @@ final class NowPlaying {
 
     private void position() {
         if (!visible) return;
-        card.post(() -> {
-            if (!visible || card.getParent() == null) return;
-            View root = (View) card.getParent();
-            if (card.getHeight() > 0) barHeight = card.getHeight();
-            int fallback = card.getLayoutParams() != null ? card.getLayoutParams().height : 0;
-            int height = card.getHeight() > 0 ? card.getHeight()
-                    : fallback > 0 ? fallback : barHeight > 0 ? barHeight : dp(80);
-            float bottom = dockTop > 0 ? dockTop : root.getHeight() * 0.55f;
-            float y = bottom - height - dp(12 + Config.dockGap(activity));
-            boolean fits = y >= dp(100);
-            if (fits != spaceVisible) {
-                spaceVisible = fits;
-                card.animate().cancel();
-                if (fits) {
-                    setBarFocusable(true);
-                    card.setVisibility(View.VISIBLE);
-                    card.setAlpha(1f);
-                    card.setTranslationY(0f);
-                    notifyVisibility(true);
-                    startTicking();
-                } else {
-                    boolean hadFocus = card.hasFocus();
-                    setBarFocusable(false);
-                    if (hadFocus) {
-                        card.clearFocus();
-                        focusDock.run();
-                    }
-                    stopVisual();
-                    card.setVisibility(View.GONE);
-                    card.setAlpha(0f);
-                    card.setTranslationY(0f);
-                    notifyVisibility(false);
+        // Apply immediately when the view is already laid out, so a metadata/state update does
+        // not draw one frame at the layout origin. The post repeats it after a layout or a
+        // size change settles.
+        applyPosition();
+        card.post(this::applyPosition);
+    }
+
+    private void applyPosition() {
+        if (!visible || card.getParent() == null || rootView == null) return;
+        View root = rootView;
+        if (root.getHeight() <= 0 || card.getHeight() <= 0) return;   // wait for the first layout
+        barHeight = card.getHeight();
+        int height = card.getHeight();
+        float bottom = dockTop > 0 ? dockTop : root.getHeight() * 0.55f;
+        float y = bottom - height - dp(12 + Config.dockGap(activity));
+        boolean fits = y >= dp(100);
+        if (fits != spaceVisible) {
+            spaceVisible = fits;
+            card.animate().cancel();
+            if (fits) {
+                setBarFocusable(true);
+                card.setVisibility(View.VISIBLE);
+                card.setAlpha(1f);
+                notifyVisibility(true);
+                startTicking();
+            } else {
+                boolean hadFocus = card.hasFocus();
+                setBarFocusable(false);
+                if (hadFocus) {
+                    card.clearFocus();
+                    focusDock.run();
                 }
+                stopVisual();
+                card.setVisibility(View.GONE);
+                card.setAlpha(0f);
+                notifyVisibility(false);
             }
-            if (spaceVisible) card.setY(Math.max(dp(100), y));
-        });
+        }
+        if (spaceVisible) card.setY(Math.max(dp(100), y));
     }
 
     /** No invisible control may keep focus while the bar is hidden or has no room. */

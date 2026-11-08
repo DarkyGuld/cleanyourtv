@@ -12,6 +12,7 @@ import android.os.Build;
 import android.provider.Settings;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.KeyEvent;
 
 import java.util.ArrayList;
@@ -125,12 +126,21 @@ final class RemoteKeys {
     static void applyKeyFilter(AccessibilityService service, boolean keyFilter) {
         AccessibilityServiceInfo info = service.getServiceInfo();
         if (info == null) return;
-        if (keyFilter) {
-            info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
-        } else {
-            info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
-        }
+        info.flags = filterFlags(info.flags, keyFilter);
         service.setServiceInfo(info);
+        if (lastFilter == null || lastFilter != keyFilter) {
+            lastFilter = keyFilter;
+            Log.d("TvHomeKeys", "key filter " + (keyFilter ? "on" : "off"));
+        }
+    }
+
+    /** Last logged key_filter state; two helpers apply the same setting on every config read. */
+    private static Boolean lastFilter;
+
+    /** The filter bit after a key_filter change, in both directions, without touching other flags. */
+    static int filterFlags(int flags, boolean keyFilter) {
+        int bit = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        return keyFilter ? flags | bit : flags & ~bit;
     }
 
     /**

@@ -66,18 +66,25 @@
             android:letterSpacing="0.14"
             android:textAllCaps="true" />
 
+        <!-- Song · artist, hidden unless ClockDream/ClockActivity fill it. The pill keeps it legible
+             over a bright wallpaper and adds ~38dp at most, which placeClock still keeps on screen. -->
         <TextView
             android:id="@+id/dreamMediaTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
-            android:layout_marginTop="12dp"
-            android:maxWidth="820dp"
-            android:singleLine="true"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/clock_song_pill"
             android:ellipsize="end"
+            android:fontFamily="@string/font_medium"
+            android:maxWidth="820dp"
+            android:paddingStart="14dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="5dp"
+            android:singleLine="true"
             android:textColor="#CCFFFFFF"
             android:textSize="15sp"
-            android:fontFamily="@string/font_medium"
             android:visibility="gone" />
     </LinearLayout>
 </FrameLayout>

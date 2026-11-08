@@ -13,14 +13,12 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.ImageDecoder;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
-import android.graphics.drawable.AnimatedImageDrawable;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -59,7 +57,7 @@ import java.util.Set;
  * then empty slots up to a full row, see {@link DockSlots}), then the module cards the owner chose to show
  * (by label), the rest is alphabetical.
  */
-// AnimatedImageDrawable and ImageDecoder are API 28; every creation path is guarded by a Build.VERSION
+// AnimatedImageDrawable and ImageDecoder are API 28 and live in AnimatedBanner; every call here is guarded by a Build.VERSION
 // check, but the field types and stop/start calls are not visible to lint's flow analysis.
 @SuppressLint("NewApi")
 public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
@@ -431,112 +429,6 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         notifyDataSetChanged();
     }
 
-    /** Removes the pack icon's plate, keeps its logo and scales that logo into one shared box. */
-    private Drawable packLogo(Drawable icon) {
-        int w = 320, h = 180;
-        Bitmap source = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(source);
-        if (icon != null) {
-            int iw = icon.getIntrinsicWidth();
-            int ih = icon.getIntrinsicHeight();
-            if (iw > 0 && ih > 0) {
-                // Cover the canvas first: square app icons then expose their own plate colour in every corner.
-                float scale = Math.max(w / (float) iw, h / (float) ih);
-                int dw = Math.max(1, Math.round(iw * scale));
-                int dh = Math.max(1, Math.round(ih * scale));
-                int left = (w - dw) / 2;
-                int top = (h - dh) / 2;
-                icon.setBounds(left, top, left + dw, top + dh);
-            } else {
-                icon.setBounds(0, 0, w, h);
-            }
-            icon.draw(canvas);
-        }
-        int[] pixels = new int[w * h];
-        source.getPixels(pixels, 0, w, 0, 0, w, h);
-        int[] corners = {0, w - 1, (h - 1) * w, (h - 1) * w + w - 1};
-        int bgR = 0, bgG = 0, bgB = 0, bgAlpha = 0;
-        for (int index : corners) {
-            bgAlpha += Color.alpha(pixels[index]);
-            bgR += Color.red(pixels[index]);
-            bgG += Color.green(pixels[index]);
-            bgB += Color.blue(pixels[index]);
-        }
-        bgAlpha /= 4;
-        bgR /= 4;
-        bgG /= 4;
-        bgB /= 4;
-        boolean[] background = new boolean[pixels.length];
-        for (int i = 0; i < pixels.length; i++) {
-            int alpha = Color.alpha(pixels[i]);
-            if (alpha < 32) {
-                background[i] = true;
-            } else if (bgAlpha >= 32) {
-                int distance = Math.max(Math.abs(Color.red(pixels[i]) - bgR),
-                        Math.max(Math.abs(Color.green(pixels[i]) - bgG),
-                                Math.abs(Color.blue(pixels[i]) - bgB)));
-                background[i] = distance < 34;
-            }
-        }
-        boolean[] removed = new boolean[pixels.length];
-        java.util.ArrayDeque<Integer> queue = new java.util.ArrayDeque<>();
-        for (int x = 0; x < w; x++) {
-            enqueue(x, background, removed, queue);
-            enqueue((h - 1) * w + x, background, removed, queue);
-        }
-        for (int y = 0; y < h; y++) {
-            enqueue(y * w, background, removed, queue);
-            enqueue(y * w + w - 1, background, removed, queue);
-        }
-        while (!queue.isEmpty()) {
-            int index = queue.removeFirst();
-            int x = index % w;
-            int y = index / w;
-            if (x > 0) enqueue(index - 1, background, removed, queue);
-            if (x < w - 1) enqueue(index + 1, background, removed, queue);
-            if (y > 0) enqueue(index - w, background, removed, queue);
-            if (y < h - 1) enqueue(index + w, background, removed, queue);
-        }
-        int minX = w, minY = h, maxX = -1, maxY = -1;
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int index = y * w + x;
-                if (removed[index] || Color.alpha(pixels[index]) < 12) continue;
-                minX = Math.min(minX, x);
-                minY = Math.min(minY, y);
-                maxX = Math.max(maxX, x);
-                maxY = Math.max(maxY, y);
-            }
-        }
-        if (maxX < minX || maxY < minY) {
-            return new BitmapDrawable(ctx.getResources(), source);
-        }
-        Bitmap foreground = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-        int[] foregroundPixels = new int[pixels.length];
-        for (int i = 0; i < pixels.length; i++) {
-            foregroundPixels[i] = removed[i] ? 0 : pixels[i];
-        }
-        foreground.setPixels(foregroundPixels, 0, w, 0, 0, w, h);
-        Bitmap cropped = Bitmap.createBitmap(foreground, minX, minY,
-                maxX - minX + 1, maxY - minY + 1);
-        Bitmap output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-        Canvas out = new Canvas(output);
-        float scale = Math.min(w * 0.94f / cropped.getWidth(), h * 0.80f / cropped.getHeight());
-        int dw = Math.max(1, Math.round(cropped.getWidth() * scale));
-        int dh = Math.max(1, Math.round(cropped.getHeight() * scale));
-        android.graphics.Rect dst = new android.graphics.Rect(
-                (w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2);
-        out.drawBitmap(cropped, null, dst, new Paint(Paint.FILTER_BITMAP_FLAG));
-        return new BitmapDrawable(ctx.getResources(), output);
-    }
-
-    private void enqueue(int index, boolean[] background, boolean[] removed,
-                         java.util.ArrayDeque<Integer> queue) {
-        if (index < 0 || index >= background.length || !background[index] || removed[index]) return;
-        removed[index] = true;
-        queue.addLast(index);
-    }
-
     /** Normalises pack art and fallback icons into one consistent 16:9 frame. */
     private Drawable packArtwork(Drawable icon) {
         int w = 320, h = 180;
@@ -569,24 +461,6 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return new android.graphics.drawable.BitmapDrawable(ctx.getResources(), bmp);
     }
 
-    /** Whether this package has a bundled custom banner that can be toggled in the tile menu. */
-    boolean hasCustomBanner(String pkg) {
-        return appBanners.containsKey(pkg);
-    }
-
-    /** Every package with a bundled custom banner, for the "all icons" toggle. */
-    Set<String> customBannerPackages() {
-        return Collections.unmodifiableSet(appBanners.keySet());
-    }
-
-    /** True when every app with a custom banner currently uses the given style. */
-    boolean allCustomBannersStyle(int style) {
-        for (String pkg : appBanners.keySet()) {
-            if (IconChoices.style(ctx, pkg) != style) return false;
-        }
-        return true;
-    }
-
     /** Theme icon path for a package: icons/<package>.webp/png/jpg, or null. */
     /** The static twin of an animated Glitch banner (banner_glitch_x -> banner_still_x). */
     private static String stillBanner(String glitch) {
@@ -611,24 +485,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     void startAnimations() {
         animationsRunning = true;
         if (Build.VERSION.SDK_INT < 28) return;
-        for (Entry e : items) {
-            if (e.banner instanceof AnimatedImageDrawable) {
-                AnimatedImageDrawable animation = (AnimatedImageDrawable) e.banner;
-                animation.setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
-                animation.start();
-            }
-        }
+        for (Entry e : items) AnimatedBanner.start(e.banner);
     }
 
     /** Stops the Glitch banners while Home is in the background; they keep the compositor busy otherwise. */
     void stopAnimations() {
         animationsRunning = false;
         if (Build.VERSION.SDK_INT < 28) return;
-        for (Entry e : items) {
-            if (e.banner instanceof AnimatedImageDrawable) {
-                ((AnimatedImageDrawable) e.banner).stop();
-            }
-        }
+        for (Entry e : items) AnimatedBanner.stop(e.banner);
     }
 
     /** A banner_* drawable bundled with the launcher, or an icons/<package> file from the theme. */
@@ -640,13 +504,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             if (file == null || !file.isFile()) return null;
             if (Build.VERSION.SDK_INT >= 28) {
                 try {
-                    Drawable d = ImageDecoder.decodeDrawable(
-                            ImageDecoder.createSource(file),
-                            (decoder, info, source) -> decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE));
-                    if (d instanceof AnimatedImageDrawable) {
-                        ((AnimatedImageDrawable) d).setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
-                    }
-                    return d;
+                    return AnimatedBanner.decode(file);
                 } catch (IOException | RuntimeException ignored) {
                     // Fall back to the static file below.
                 }
@@ -660,13 +518,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             try {
                 // Software allocation: vividColor() samples the banner on a software Canvas, and
                 // drawing a hardware bitmap there throws "Software rendering doesn't support hardware bitmaps".
-                Drawable d = ImageDecoder.decodeDrawable(
-                        ImageDecoder.createSource(ctx.getResources(), id),
-                        (decoder, info, source) -> decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE));
-                if (d instanceof AnimatedImageDrawable) {
-                    ((AnimatedImageDrawable) d).setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
-                }
-                return d;
+                return AnimatedBanner.decode(ctx, id);
             } catch (IOException | RuntimeException ignored) {
                 // Fall back to the static decode below; a corrupt animation must not hide the app tile.
             }
@@ -773,23 +625,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             Motion.cancelFocus(((Holder) holder).card);
             ((Holder) holder).jiggle(false);
             Drawable d = ((Holder) holder).banner.getDrawable();
-            if (Build.VERSION.SDK_INT >= 28 && d instanceof AnimatedImageDrawable) {
-                ((AnimatedImageDrawable) d).stop();
-            }
+            if (Build.VERSION.SDK_INT >= 28) AnimatedBanner.stop(d);
         }
         super.onViewRecycled(holder);
-    }
-
-    /** Installed icon-pack marks are transparent, so give them a little more room than a banner icon. */
-    private void sizePackIcon(Holder h) {
-        int cardHeight = h.card.getLayoutParams().height;
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) h.icon.getLayoutParams();
-        int side = Math.round(cardHeight * 0.72f);
-        if (lp.width != side || lp.height != side || lp.bottomMargin != 0) {
-            lp.width = lp.height = side;
-            lp.bottomMargin = 0;
-            h.icon.setLayoutParams(lp);
-        }
     }
 
     /** Glass uses the uniform tile's large mark; the normal icon tile keeps its 48dp mark and caption room. */
@@ -888,15 +726,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             h.glassOverlay.setVisibility(View.VISIBLE);
             h.card.setBackground(null);
             Drawable previous = h.banner.getDrawable();
-            if (Build.VERSION.SDK_INT >= 28 && previous instanceof AnimatedImageDrawable
-                    && previous != e.banner) {
-                ((AnimatedImageDrawable) previous).stop();
+            if (Build.VERSION.SDK_INT >= 28 && previous != e.banner
+                    && AnimatedBanner.isAnimated(previous)) {
+                AnimatedBanner.stop(previous);
             }
             h.banner.setImageDrawable(e.banner);
-            if (Build.VERSION.SDK_INT >= 28 && e.banner instanceof AnimatedImageDrawable
-                    && animationsRunning) {
-                ((AnimatedImageDrawable) e.banner).start();
-            }
+            if (Build.VERSION.SDK_INT >= 28 && animationsRunning) AnimatedBanner.start(e.banner);
             h.banner.setVisibility(View.VISIBLE);
             // Keep the artwork clear; the glass transparency setting controls the tile around it.
             h.banner.setAlpha(0.70f + 0.25f * glassOpacity);
@@ -924,15 +759,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             h.label.setVisibility(View.GONE);
         } else if (e.banner != null) {
             Drawable previous = h.banner.getDrawable();
-            if (Build.VERSION.SDK_INT >= 28 && previous instanceof AnimatedImageDrawable
-                    && previous != e.banner) {
-                ((AnimatedImageDrawable) previous).stop();
+            if (Build.VERSION.SDK_INT >= 28 && previous != e.banner
+                    && AnimatedBanner.isAnimated(previous)) {
+                AnimatedBanner.stop(previous);
             }
             h.banner.setImageDrawable(e.banner);
-            if (Build.VERSION.SDK_INT >= 28 && e.banner instanceof AnimatedImageDrawable
-                    && animationsRunning) {
-                ((AnimatedImageDrawable) e.banner).start();
-            }
+            if (Build.VERSION.SDK_INT >= 28 && animationsRunning) AnimatedBanner.start(e.banner);
             h.banner.setVisibility(View.VISIBLE);
             h.icon.setVisibility(View.GONE);
             h.label.setVisibility(View.GONE);

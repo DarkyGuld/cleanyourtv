@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/dreamRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF06080B">
+
+    <ImageView
+        android:id="@+id/dreamBackground"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0.52"
+        android:scaleType="centerCrop"
+        android:importantForAccessibility="no" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/now_playing_full_scrim" />
+
+    <!-- Same idea as the full-screen player: the art absorbs the spare height, so on a short
+         screen it shrinks instead of pushing the title, waveform and time off the panel. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingStart="100dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="100dp"
+        android:paddingBottom="24dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <com.gathin.tvhome.SquareImageView
+                android:id="@+id/dreamArt"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:background="@drawable/now_playing_full_art_bg"
+                android:clipToOutline="true"
+                android:elevation="18dp"
+                android:scaleType="centerCrop"
+                android:importantForAccessibility="no" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/dreamTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:ellipsize="end"
+            android:fontFamily="@string/font_medium"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="30sp" />
+
+        <TextView
+            android:id="@+id/dreamArtist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="#B3FFFFFF"
+            android:textSize="18sp" />
+
+        <!-- The 70dp side padding keeps the bar at 620dp on a 960dp-wide panel and lets it
+             shrink, rather than run off the edge, on narrower ones. -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="22dp"
+            android:paddingStart="70dp"
+            android:paddingEnd="70dp">
+
+            <com.gathin.tvhome.WaveformSeekBar
+                android:id="@+id/dreamWaveform"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:focusable="false"
+                android:importantForAccessibility="no" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/dreamTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:textColor="#99FFFFFF"
+            android:textSize="14sp" />
+    </LinearLayout>
+</FrameLayout>

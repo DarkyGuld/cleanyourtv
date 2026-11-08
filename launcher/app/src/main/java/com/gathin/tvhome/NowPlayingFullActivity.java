@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -48,6 +50,7 @@ public final class NowPlayingFullActivity extends Activity {
     private int artGeneration;
     private Bitmap artSource;
     private Bitmap scaledArt;
+    private Bitmap blurredArt;
     private int artColour = 0xFF101419;
     private boolean resumed;
     private boolean callbackRegistered;
@@ -76,7 +79,9 @@ public final class NowPlayingFullActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        setContentView(R.layout.activity_now_playing_full);
+        setContentView(Config.npFullStyle(this) == 1
+                ? R.layout.activity_now_playing_full_classic
+                : R.layout.activity_now_playing_full);
         rootView = findViewById(R.id.fullRoot);
         background = findViewById(R.id.fullBackground);
         art = findViewById(R.id.fullArt);
@@ -91,8 +96,19 @@ public final class NowPlayingFullActivity extends Activity {
         ImageButton close = findViewById(R.id.fullClose);
 
         close.setOnClickListener(v -> finishIfAllowed());
+        previous.setNextFocusRightId(R.id.fullPlay);
+        previous.setNextFocusDownId(R.id.fullWaveform);
+        play.setNextFocusLeftId(R.id.fullPrev);
+        play.setNextFocusRightId(R.id.fullNext);
+        play.setNextFocusUpId(R.id.fullClose);
+        play.setNextFocusDownId(R.id.fullWaveform);
+        next.setNextFocusLeftId(R.id.fullPlay);
+        next.setNextFocusDownId(R.id.fullWaveform);
         next.setNextFocusRightId(R.id.fullClose);
+        next.setNextFocusUpId(R.id.fullClose);
         close.setNextFocusLeftId(R.id.fullNext);
+        close.setNextFocusDownId(R.id.fullPlay);
+        waveform.setNextFocusUpId(R.id.fullPlay);
 
         previous.setOnClickListener(v -> transport(controller, controls -> controls.skipToPrevious()));
         next.setOnClickListener(v -> transport(controller, controls -> controls.skipToNext()));
@@ -106,6 +122,15 @@ public final class NowPlayingFullActivity extends Activity {
         }));
 
         waveform.setMode(Config.npVisualMode(this));
+        waveform.setOnKeyListener((v, key, event) -> {
+            if (event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                    && (key == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                    || key == android.view.KeyEvent.KEYCODE_DPAD_UP)) {
+                play.requestFocus();
+                return true;
+            }
+            return false;
+        });
         waveform.setSource(visualSource);
         waveform.setGlow(Config.npGlow(this));
         waveform.setAccent(Config.npAccentColor(this));
@@ -130,7 +155,14 @@ public final class NowPlayingFullActivity extends Activity {
         art.animate().scaleX(1f).scaleY(1f).alpha(1f)
                 .setDuration(380)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f)).start();
-        play.requestFocus();
+        play.post(() -> play.requestFocus());
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // The first post can run before the window takes focus; ask again once it has.
+        if (hasFocus && play != null) play.post(play::requestFocus);
     }
 
     private void transport(MediaController target, Consumer<MediaController.TransportControls> action) {
@@ -236,15 +268,14 @@ public final class NowPlayingFullActivity extends Activity {
         if (bitmap == null && metadata != null) bitmap = metadata.getBitmap(MediaMetadata.METADATA_KEY_ART);
         if (bitmap == null && metadata != null) bitmap = metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
         if (bitmap == null) {
-            if (artSource != null || art.getVisibility() == View.VISIBLE) {
-                artSource = null;
-                scaledArt = null;
-                artGeneration++;
-                background.setImageDrawable(null);
-                art.setImageDrawable(null);
-                art.setVisibility(View.GONE);
-                resetGradient();
-            }
+            artSource = null;
+            scaledArt = null;
+            artGeneration++;
+            resetGradient();
+            // No album art: the app icon keeps the large cover from becoming a black hole.
+            art.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            art.setImageDrawable(appIcon(current.getPackageName()));
+            art.setVisibility(View.VISIBLE);
         } else if (bitmap != artSource) {
             artSource = bitmap;
             loadArt(bitmap);
@@ -326,8 +357,25 @@ public final class NowPlayingFullActivity extends Activity {
     }
 
     private void applyArt(Bitmap bitmap, int colour) {
-        background.setImageBitmap(bitmap);
-        background.setAlpha(0.24f);
+        // HeroArt reduces the cover to 48 x 27 and box-blurs it: stretching that is the ambient
+        // background blur without RenderEffect, which this API 30 TV cannot use.
+        Bitmap readable = bitmap;
+        try {
+            if (bitmap.getConfig() == Bitmap.Config.HARDWARE) {
+                readable = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+            }
+            Bitmap blurred = HeroArt.from(new BitmapDrawable(getResources(), readable));
+            if (blurredArt != null && blurredArt != blurred) blurredArt.recycle();
+            blurredArt = blurred;
+            background.setImageBitmap(blurred);
+            background.setAlpha(0.62f);
+        } catch (RuntimeException | OutOfMemoryError ignored) {
+            background.setImageBitmap(bitmap);
+            background.setAlpha(0.30f);
+        } finally {
+            if (readable != bitmap) readable.recycle();
+        }
+        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
         art.setImageBitmap(bitmap);
         art.setVisibility(View.VISIBLE);
         rootView.setBackground(new GradientDrawable(
@@ -336,6 +384,11 @@ public final class NowPlayingFullActivity extends Activity {
     }
 
     private void resetGradient() {
+        if (blurredArt != null) {
+            blurredArt.recycle();
+            blurredArt = null;
+        }
+        background.setImageDrawable(null);
         rootView.setBackground(new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xFF101419, 0xFF06080B}));
@@ -371,6 +424,14 @@ public final class NowPlayingFullActivity extends Activity {
         play.setContentDescription(getString(playing ? R.string.pause : R.string.play));
     }
 
+    private Drawable appIcon(String pkg) {
+        try {
+            return getPackageManager().getApplicationIcon(pkg);
+        } catch (PackageManager.NameNotFoundException | RuntimeException unavailable) {
+            return getDrawable(R.drawable.ic_apps);
+        }
+    }
+
     private String appLabel(String pkg) {
         try {
             PackageManager pm = getPackageManager();
@@ -397,6 +458,7 @@ public final class NowPlayingFullActivity extends Activity {
         handler.removeCallbacks(tick);
         handler.post(tick);
         refreshSessions();
+        if (play != null && !play.hasFocus() && !rootView.hasFocus()) play.post(play::requestFocus);
     }
 
     @Override
@@ -422,6 +484,10 @@ public final class NowPlayingFullActivity extends Activity {
         artGeneration++;
         unregisterCallback();
         artExecutor.shutdownNow();
+        if (blurredArt != null) {
+            blurredArt.recycle();
+            blurredArt = null;
+        }
         super.onDestroy();
     }
 }

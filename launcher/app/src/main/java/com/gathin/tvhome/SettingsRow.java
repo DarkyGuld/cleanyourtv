@@ -2,6 +2,9 @@ package com.gathin.tvhome;
 
 import android.content.Context;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
@@ -22,30 +25,58 @@ public final class SettingsRow extends TextView {
     private String raw;
     private boolean focused;
     private static boolean lightMode;
+    private int leadingIcon;
+    private Drawable leadingDrawable;
+    private Drawable trailingDrawable;
 
     static void setLightMode(boolean light) {
         lightMode = light;
     }
 
+    /** A rounded tile with an 18dp icon before the title, the shared row anatomy. */
+    void setLeadingIcon(int resId) {
+        if (resId == leadingIcon) return;
+        leadingIcon = resId;
+        leadingDrawable = resId == 0 ? null : iconTile(resId);
+        applyDrawables();
+    }
+
+    private Drawable iconTile(int resId) {
+        float density = getResources().getDisplayMetrics().density;
+        int tile = Math.round(36 * density);
+        int icon = Math.round(18 * density);
+        int inset = (tile - icon) / 2;
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0x14000000);
+        background.setCornerRadius(10 * density);
+        background.setSize(tile, tile);
+        LayerDrawable layer = new LayerDrawable(new Drawable[]{background, getContext().getDrawable(resId)});
+        layer.setLayerInset(1, inset, inset, inset, inset);
+        layer.setBounds(0, 0, tile, tile);
+        return layer;
+    }
+
     /** A chevron for rows that open a dialog; ignored for toggles. */
     void setChevron(boolean show) {
-        if (show) {
-            setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, R.drawable.ic_chevron, 0);
-            setCompoundDrawablePadding(Math.round(8 * getResources().getDisplayMetrics().density));
-        } else {
-            setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0);
-        }
+        trailingDrawable = show ? getContext().getDrawable(R.drawable.ic_chevron) : null;
+        applyDrawables();
     }
 
     /** A non-Material pill on the right for boolean rows. */
     void setToggle(boolean on) {
-        setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0,
-                on ? R.drawable.settings_toggle_on : R.drawable.settings_toggle_off, 0);
-        setCompoundDrawablePadding(Math.round(12 * getResources().getDisplayMetrics().density));
+        trailingDrawable = getContext().getDrawable(
+                on ? R.drawable.settings_toggle_on : R.drawable.settings_toggle_off);
+        applyDrawables();
     }
 
     void clearTrailing() {
-        setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0);
+        trailingDrawable = null;
+        applyDrawables();
+    }
+
+    private void applyDrawables() {
+        setCompoundDrawablesRelativeWithIntrinsicBounds(leadingDrawable, null, trailingDrawable, null);
+        setCompoundDrawablePadding(Math.round(12 * getResources().getDisplayMetrics().density));
     }
 
     public SettingsRow(Context context, AttributeSet attrs) {

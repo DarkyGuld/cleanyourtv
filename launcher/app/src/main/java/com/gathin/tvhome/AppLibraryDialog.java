@@ -117,6 +117,8 @@ final class AppLibraryDialog {
     private final Map<String, String> labels = new HashMap<>();
     private long catalogTime;
     private PopupWindow actionPopup;
+    /** Set by close(): a real close must not be turned into a query clear by the Back guard below. */
+    private boolean forceDismiss;
     private RecyclerView catalog;
     private FrameLayout shelf;
     private GlassView highlight;
@@ -191,14 +193,25 @@ final class AppLibraryDialog {
                 ? R.drawable.glass_panel_liquid : R.drawable.glass_panel);
         GlassBackground.apply(activity, panel, 24);
         if (Config.glassFullyTransparent(activity)) {
-            // GlassBackground clears the background at 100 %; the library still needs a readable scrim.
-            panel.setBackground(surface(0x66000000, 24));
+            // GlassBackground clears the background at 100 %; the library is a modal picker, so
+            // keep enough dark cover that white labels and icons stay readable over a bright Home.
+            panel.setBackground(surface(0xCC000000, 24));
         }
         View decor = activity.getWindow().getDecorView();
         catalogWidth = Math.min(dp(800), Math.max(dp(200), decor.getWidth() - dp(64)));
         int width = catalogWidth;
         int height = dp(330);
-        popup = new PopupWindow(panel, width, height, true);
+        // PopupWindow consumes Back itself before the focused child sees it. Intercept its dismiss
+        // so the first Back clears the query, the second hides the keyboard and the third closes.
+        popup = new PopupWindow(panel, width, height, true) {
+            @Override
+            public void dismiss() {
+                // A finishing Home must never keep the panel alive for the Back guard.
+                if (!forceDismiss && !activity.isFinishing() && !activity.isDestroyed()
+                        && consumeBack()) return;
+                super.dismiss();
+            }
+        };
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
         popup.setAnimationStyle(0);
@@ -219,6 +232,7 @@ final class AppLibraryDialog {
 
     void close() {
         dismissActions();
+        forceDismiss = true;
         if (popup.isShowing()) {
             popup.dismiss();
         } else if (!closed) {
@@ -458,6 +472,22 @@ final class AppLibraryDialog {
         if (imm != null) imm.hideSoftInputFromWindow(search.getWindowToken(), 0);
     }
 
+    /** True when Back cleared the query or hid the keyboard instead of closing the library. */
+    private boolean consumeBack() {
+        if (search == null) return false;
+        if (search.length() > 0) {
+            search.setText("");
+            // The query and the IME usually go together; onKeyPreIme proves the IME had the key.
+            hideKeyboard();
+            return true;
+        }
+        if (keyboardShown) {
+            hideKeyboard();
+            return true;
+        }
+        return false;
+    }
+
     private void focusFirstCard() {
         hideKeyboard();
         if (catalog == null || apps.isEmpty()) return;
@@ -498,7 +528,16 @@ final class AppLibraryDialog {
         instructions.setEllipsize(TextUtils.TruncateAt.END);
         instructions.setPadding(dp(12), 0, dp(12), dp(6));
         panel.addView(instructions, new LinearLayout.LayoutParams(-1, dp(26)));
-        search = new EditText(activity);
+        search = new EditText(activity) {
+            @Override
+            public boolean onKeyPreIme(int keyCode, KeyEvent event) {
+                // The IME gets Back before the PopupWindow; clear the query and hide the keyboard
+                // together here, so the next Back reaches the popup and closes the library.
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP
+                        && consumeBack()) return true;
+                return super.onKeyPreIme(keyCode, event);
+            }
+        };
         search.setSingleLine(true);
         search.setFocusable(true);
         search.setFocusableInTouchMode(true);
@@ -524,18 +563,7 @@ final class AppLibraryDialog {
                 return true;
             }
             if (key == KeyEvent.KEYCODE_DPAD_UP) return true;
-            if (key == KeyEvent.KEYCODE_BACK) {
-                // First Back clears the query, second hides the keyboard, third closes the library.
-                if (search.length() > 0) {
-                    search.setText("");
-                    return true;
-                }
-                if (keyboardShown) {
-                    hideKeyboard();
-                    return true;
-                }
-                return false;
-            }
+            // Back is handled by the PopupWindow override above; PopupWindow eats it before this child.
             return false;
         });
         search.addTextChangedListener(new TextWatcher() {

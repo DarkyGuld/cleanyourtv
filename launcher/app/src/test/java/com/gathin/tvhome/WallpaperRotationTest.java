@@ -32,11 +32,12 @@ public class WallpaperRotationTest {
         File dir = Files.createTempDirectory("walls").toFile();
         touch(dir, "b.JPG", 10);
         touch(dir, "a.png", 10);
+        touch(dir, ".hidden.jpg", 10);
         touch(dir, "notes.txt", 10);
         touch(dir, "empty.jpg", 0);
         new File(dir, "folder.jpg").mkdir();
         List<File> images = WallpaperRotation.images(dir);
-        assertEquals(Arrays.asList("a.png", "b.JPG"), names(images));
+        assertEquals(Arrays.asList(".hidden.jpg", "a.png", "b.JPG"), names(images));
         assertTrue(WallpaperRotation.images(null).isEmpty());
         assertTrue(WallpaperRotation.images(new File(dir, "missing")).isEmpty());
     }
@@ -91,6 +92,22 @@ public class WallpaperRotationTest {
         List<File> images = Arrays.asList(new File("a.jpg"), new File("b.jpg"));
         assertEquals("b.jpg", WallpaperRotation.find(images, "b.jpg").getName());
         assertNull(WallpaperRotation.find(images, "c.jpg"));
+    }
+
+    @Test
+    public void explicitTokensDistinguishTheRootFromTheCollection() {
+        File collection = new File("wallpapers");
+        File inCollection = new File(collection, "wallpaper.jpg");
+        File root = new File("wallpaper.jpg");
+        List<File> images = Collections.singletonList(inCollection);
+        assertEquals(Collections.singletonList(inCollection),
+                WallpaperRotation.chosen(images, root, "wallpapers/wallpaper.jpg"));
+        assertEquals(Collections.singletonList(root),
+                WallpaperRotation.chosen(images, root, "root/wallpaper.jpg"));
+        // A bare name is an older saved choice; the collection still wins, as it did then.
+        assertEquals(Collections.singletonList(inCollection),
+                WallpaperRotation.chosen(images, root, "wallpaper.jpg"));
+        assertNull(WallpaperRotation.chosen(images, root, "root/missing.jpg"));
     }
 
     @Test

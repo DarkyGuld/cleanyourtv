@@ -146,9 +146,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private long settingsRevision;
     /** Idle time on Home before ClockActivity; 0 is off (config.xml, home_idle_clock_minutes). */
     private long idleClockMs;
+    /** Opt-in delay before the ambient full-screen player; 0 is off. */
+    private long ambientIdleMs;
     /** Back on Home opens ClockActivity (config.xml, back_opens_clock). */
     private boolean backOpensClock;
     private final Runnable showIdleClock = this::startIdleClock;
+    private final Runnable showAmbient = this::startAmbientNowPlaying;
     private String liveTvAction;
     private String liveTvInputId;
     /** The app library is on (config.xml, app_library): only then can the tile menu take an app off Home. */
@@ -201,6 +204,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private final Map<String, Bitmap> heroArtCache = new HashMap<>();
     /** The app whose artwork heroArt shows, so focusing it again only fades it back in. */
     private String heroArtKey;
+    /** The app whose artwork is waiting for the fade-out swap, so a pause cannot mark it as shown. */
+    private String heroArtPending;
+    // Focus-time display settings, cached so D-pad navigation does not read SharedPreferences per tile.
+    private int parallaxSetting;
+    private float iconGlowSetting;
+    private int focusMotionSetting;
+    private int ambientModeSetting;
+    private int topShelfSetting;
+    private int heroTitleSetting;
     /** The focus glow's colour while the cinematic shelf tints it, 0 for plain white glass. */
     private int glassAccent;
     private int ambientColor = -1;
@@ -553,6 +565,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         animations = cfg.animations;
         advancedEffects = cfg.animations && cfg.advancedEffects;
         reducedMotion = cfg.reducedMotion;
+        parallaxSetting = Config.parallax(this);
+        iconGlowSetting = Math.max(0f, Math.min(1f, Config.iconGlow(this) / 100f));
+        focusMotionSetting = Config.focusMotion(this);
+        ambientModeSetting = Config.ambientMode(this);
+        topShelfSetting = Config.topShelf(this);
         dockRow = cfg.dockRow;
         singleRow = cfg.singleRow;
         focusOvershoot = cfg.focusOvershoot;
@@ -561,6 +578,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         festive = festival.active(LocalDate.now());
         liveTvPkg = cfg.liveTvPackage;
         idleClockMs = cfg.homeIdleClockMinutes * MINUTE_MS;
+        ambientIdleMs = Config.ambientNowPlaying(this)
+                ? Config.ambientIdleMinutes(this) * MINUTE_MS : 0;
         backOpensClock = cfg.backOpensClock;
         bootToLiveTv = cfg.bootToLiveTv;
         openOnStartChoice = cfg.openOnStartChoice;
@@ -606,11 +625,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (!ambientGlow) ambient.setVisibility(View.GONE);
         heroName = findViewById(R.id.heroName);
         hero = findViewById(R.id.hero);
-        int heroStyle = Config.heroTitle(this);
-        if (heroStyle == 2) {
+        heroTitleSetting = Config.heroTitle(this);
+        if (heroTitleSetting == 2) {
             hero.setVisibility(View.GONE);
         } else {
-            heroName.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, heroStyle == 0 ? 48f : 34f);
+            heroName.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, heroTitleSetting == 0 ? 48f : 34f);
         }
         // The hero is now a group (name, and the cinematic lines): without this every fade of the default
         // shelf would render it through an offscreen buffer first, as the glow above notes.
@@ -1389,6 +1408,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             hero.setAlpha(0f);
             ambient.setAlpha(0f);
             heroArt.animate().cancel();
+            heroArtPending = null;
             heroArt.setAlpha(0f);
         }
         if (rebuild) reloadTiles();
@@ -1481,7 +1501,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void restartIdleClock() {
         root.removeCallbacks(showIdleClock);
-        if (resumed && idleClockMs > 0) root.postDelayed(showIdleClock, idleClockMs);
+        root.removeCallbacks(showAmbient);
+        if (!resumed) return;
+        if (idleClockMs > 0) root.postDelayed(showIdleClock, idleClockMs);
+        if (ambientIdleMs > 0) root.postDelayed(showAmbient, ambientIdleMs);
+    }
+
+    /** The opt-in ambient player: the same full-screen Now Playing screen, opened by Home's idle timer. */
+    private void startAmbientNowPlaying() {
+        if (!Config.ambientNowPlaying(this) || nowPlaying == null || !nowPlaying.isVisible()) return;
+        if (openPopup != null || appLibrary != null || cardPrompt != null || reordering
+                || nowPlaying.hasFocus()) {
+            restartIdleClock();
+            return;
+        }
+        startActivity(new Intent(this, NowPlayingFullActivity.class));
     }
 
     private void startIdleClock() {
@@ -1506,6 +1540,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         RemoteKeys.release(this);
         cancelHoldOk();
         root.removeCallbacks(showIdleClock);
+        root.removeCallbacks(showAmbient);
         pausing = true;
         endReorder();   // Home or another app while reordering keeps the order so far
         pausing = false;
@@ -1519,6 +1554,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         hero.animate().cancel();
         ambient.animate().cancel();
         heroArt.animate().cancel();
+        heroArtPending = null;   // the swap never ran; heroArtKey still names the visible picture
         handler.removeCallbacks(minuteTick);
         handler.removeCallbacks(petalShower);
         handler.removeCallbacks(openWhenOnline);
@@ -1572,6 +1608,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.getRecycledViewPool().clear();
         heroArtCache.clear();
         heroArtKey = null;
+        heroArtPending = null;
         if (nowPlaying != null) nowPlaying.releaseArtwork();
         wallpaperPlayer.releaseForMemoryPressure();
         tileRefresh.invalidate();
@@ -2202,7 +2239,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // GlassView draws its slab inset by pad, i.e. exactly over the zoomed tile: same corners as the tile.
             glass.setRadius(AppAdapter.cornerRadius(card.getWidth(), density) * scale);
         }
-        int parallax = Config.parallax(this);
+        int parallax = parallaxSetting;
         if (parallax > 0 && root.getWidth() > 0 && root.getHeight() > 0) {
             float strength = parallax == 2 ? 1f : 0.55f;
             wallpaperPlayer.focus((r.exactCenterX() / root.getWidth() - 0.5f) * 2f * strength,
@@ -2217,10 +2254,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // cinematic_white_focus). app_glow: every tile. In a single row every tile is the dock's kind.
         boolean coloured = (appGlow || cinematic && !cinematicWhiteFocus && (singleRow || position < COLUMNS)) && !festive;
         int accent = coloured ? adapter.ambientColorAt(position) : 0;
-        float focusGlow = Math.max(0f, Math.min(1f, Config.iconGlow(this) / 100f));
+        float focusGlow = iconGlowSetting;
         // Lumen's floating glass is the point of that mode: keep its slab clearly visible even when
         // the icon glow is set low, while 0 still turns the highlight off.
-        if (Config.focusMotion(this) == 1 && focusGlow > 0f) focusGlow = Math.max(focusGlow, 0.66f);
+        if (focusMotionSetting == 1 && focusGlow > 0f) focusGlow = Math.max(focusGlow, 0.66f);
         if ((cinematic || appGlow) && !festive && accent != glassAccent) {
             glassAccent = accent;
             glass.setAccent(accent);
@@ -2309,8 +2346,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return;
         }
         String label = adapter.labelAt(position);
-        int ambientMode = Config.ambientMode(this);
-        int color = ambientMode == 0 ? adapter.ambientColorAt(position) : 0xFFAAB6C8;
+        int ambientMode = ambientModeSetting;
+        int color = ambientMode == 0 && ambientGlow ? adapter.ambientColorAt(position) : 0xFFAAB6C8;
         ambient.setVisibility(ambientMode == 2 ? View.GONE : View.VISIBLE);
         float y = dockTopInRoot - 14 * density - 26 * density - hero.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
@@ -2318,10 +2355,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // The default shelf belongs to the dock row. Moving down into the grid must take it
             // away instead of letting it follow the focus and cover the dock/Now Playing bar.
             boolean shelfHere = !reordering && movingKey == null
-                    && (Config.topShelf(this) == 2 || position < COLUMNS);
+                    && (topShelfSetting == 2 || position < COLUMNS);
             if (shelfHere) {
                 float gap = hero.getVisibility() == View.GONE
-                        ? (Config.heroTitle(this) == 2 ? 24 * density : 14 * density)
+                        ? (heroTitleSetting == 2 ? 24 * density : 14 * density)
                         : 8 * density;
                 float shelfBottom = hero.getVisibility() == View.GONE ? dockTopInRoot - gap : y - gap;
                 topShelf.show(position, adapter.packageAt(position), shelfBottom,
@@ -2453,6 +2490,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (key == null) return;
         heroArt.animate().cancel();
         if (key.equals(heroArtKey)) {
+            heroArtPending = null;
             fadeHeroArt(420);
             return;
         }
@@ -2461,14 +2499,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             art = HeroArt.from(adapter.artworkAt(position));
             if (art != null) heroArtCache.put(key, art);
         }
-        heroArtKey = key;
         final Bitmap next = art;
         if (!animations || reducedMotion || heroArt.getAlpha() == 0f) {
+            heroArtPending = null;
+            heroArtKey = key;
             heroArt.setImageBitmap(next);
             fadeHeroArt(600);
             return;
         }
+        heroArtPending = key;
         heroArt.animate().alpha(0f).setDuration(140).withEndAction(() -> {
+            if (isDestroyed() || !key.equals(heroArtPending)) return;
+            heroArtPending = null;
+            heroArtKey = key;
             heroArt.setImageBitmap(next);
             heroArt.animate().alpha(heroArtAlpha).setDuration(420).start();
         }).start();
@@ -2612,8 +2655,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (topShelf != null) topShelf.hide(animations && !reducedMotion);
         // Keep the bar directly above the dock row as the grid scrolls, without fading it out.
         if (nowPlaying != null && nowPlaying.isVisible()) grid.post(this::updateNowPlayingDockTop);
-        int ambientMode = Config.ambientMode(this);
-        int color = ambientMode == 0 ? adapter.ambientColorAt(position) : 0xFFAAB6C8;
+        int ambientMode = ambientModeSetting;
+        int color = ambientMode == 0 && ambientGlow ? adapter.ambientColorAt(position) : 0xFFAAB6C8;
         ambient.setVisibility(ambientMode == 2 ? View.GONE : View.VISIBLE);
         stopAmbientAnimation();
         hero.animate().cancel();
@@ -4483,10 +4526,55 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View panel = getLayoutInflater().inflate(R.layout.popup_settings_scroll, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
         PopupWindow popup = glassPopup(panel, (int) (270 * density));
+        addBarRow(rows, popup, R.string.np_variant_label,
+                () -> getString(Config.npBarVariant(this) == Config.NP_BAR_EDGE
+                        ? R.string.np_variant_edge : R.string.np_variant_stacked),
+                () -> choices().edit().putInt(Config.NP_BAR_VARIANT_KEY,
+                        Config.npBarVariant(this) == Config.NP_BAR_EDGE
+                                ? Config.NP_BAR_STACKED : Config.NP_BAR_EDGE).apply());
         addBarRow(rows, popup, R.string.np_size_label,
                 () -> getString(sizeLabel(Config.npBarSize(this))),
                 () -> choices().edit().putInt(Config.NP_SIZE_KEY,
                         (Config.npBarSize(this) + 1) % 4).apply());
+        addBarRow(rows, popup, R.string.np_full_style_label,
+                () -> getString(R.string.np_full_style_state,
+                        getString(Config.npFullStyle(this) == 1
+                                ? R.string.np_full_style_classic : R.string.np_full_style_ambient)),
+                () -> choices().edit().putInt(Config.NP_FULL_STYLE_KEY,
+                        Config.npFullStyle(this) == 1 ? 0 : 1).apply());
+        addBarRow(rows, popup, R.string.np_corner_radius_label,
+                () -> getString(R.string.np_corner_radius_state, Config.npCornerRadius(this)),
+                () -> {
+                    int[] values = {0, 6, 12, 18, 24, 28};
+                    int current = Config.npCornerRadius(this);
+                    int next = values[0];
+                    for (int i = 0; i < values.length; i++) {
+                        if (values[i] == current) {
+                            next = values[(i + 1) % values.length];
+                            break;
+                        }
+                    }
+                    choices().edit().putInt(Config.NP_CORNER_RADIUS_KEY, next).apply();
+                });
+        addBarRow(rows, popup, R.string.np_prev_label,
+                () -> getString(Config.npPrev(this) ? R.string.on : R.string.off),
+                () -> choices().edit().putBoolean(Config.NP_PREV_KEY, !Config.npPrev(this)).apply());
+        addBarRow(rows, popup, R.string.np_next_label,
+                () -> getString(Config.npNext(this) ? R.string.on : R.string.off),
+                () -> choices().edit().putBoolean(Config.NP_NEXT_KEY, !Config.npNext(this)).apply());
+        addBarRow(rows, popup, R.string.ambient_now_playing_label,
+                () -> {
+                    int minutes = Config.ambientNowPlaying(this) ? Config.ambientIdleMinutes(this) : 0;
+                    return minutes <= 0 ? getString(R.string.ambient_now_playing_off)
+                            : getString(R.string.ambient_now_playing_minutes, minutes);
+                },
+                () -> {
+                    int current = Config.ambientNowPlaying(this) ? Config.ambientIdleMinutes(this) : 0;
+                    int next = current == 0 ? 5 : current == 5 ? 10 : current == 10 ? 15
+                            : current == 15 ? 30 : 0;
+                    choices().edit().putBoolean(Config.AMBIENT_NOW_PLAYING_KEY, next > 0)
+                            .putInt(Config.AMBIENT_IDLE_MINUTES_KEY, next).apply();
+                });
         addBarRow(rows, popup, R.string.np_mode_label,
                 () -> getString(visualModeLabel(Config.npVisualMode(this))),
                 () -> {
@@ -4538,7 +4626,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 () -> choices().edit().putBoolean(Config.NOW_PLAYING_FULL_KEY, !Config.nowPlayingFull(this)).apply());
         addSettingsMenuRow(rows, popup, R.string.np_design_reset, () -> {
             choices().edit()
+                    .putInt(Config.NP_BAR_VARIANT_KEY, Config.NP_BAR_EDGE)
+                    .putBoolean(Config.NP_PREV_KEY, true)
+                    .putBoolean(Config.NP_NEXT_KEY, true)
+                    .putBoolean(Config.AMBIENT_NOW_PLAYING_KEY, false)
                     .putInt(Config.NP_SIZE_KEY, 1)
+                    .putInt(Config.NP_CORNER_RADIUS_KEY, 18)
+                    .putInt(Config.NP_FULL_STYLE_KEY, 0)
                     .putInt(Config.NP_VISUAL_MODE_KEY, 1)
                     .putInt(Config.NP_BG_STYLE_KEY, 1)
                     .putInt(Config.NP_BG_OPACITY_KEY, 75)

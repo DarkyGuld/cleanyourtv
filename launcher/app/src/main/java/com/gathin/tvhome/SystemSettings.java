@@ -36,6 +36,19 @@ final class SystemSettings {
     private static final ComponentName AOSP_TV_SETTINGS =
             new ComponentName("com.android.tv.settings", "com.android.tv.settings.MainSettings");
 
+    /** True when the action opens its own page rather than a vendor/AOSP settings main screen. */
+    static boolean opensExact(Context context, String action) {
+        PackageManager pm = context.getPackageManager();
+        ResolveInfo resolved = pm.resolveActivity(new Intent(action), PackageManager.MATCH_DEFAULT_ONLY);
+        if (resolved == null || resolved.activityInfo.name.contains("CTSDummy")) return false;
+        ComponentName target = new ComponentName(resolved.activityInfo.packageName, resolved.activityInfo.name);
+        if (AOSP_TV_SETTINGS.equals(target)) return false;
+        for (String value : context.getResources().getStringArray(R.array.settings_fallback_components)) {
+            if (target.equals(ComponentName.unflattenFromString(value))) return false;
+        }
+        return true;
+    }
+
     /** The first vendor settings entry from settings_fallback_components that is installed and whose
      *  activity is enabled and exported, or null when none is. China-market firmware keeps pages the
      *  AOSP TV settings has no row for - Xiaomi's Account & Security, where the ADB switch lives - in

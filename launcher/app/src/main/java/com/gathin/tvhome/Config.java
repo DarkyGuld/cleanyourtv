@@ -74,6 +74,7 @@ final class Config {
     static final String CONTROL_CENTER_KEY = "control_center";
     static final String APP_NAMES_KEY = "app_names";
     static final String SCREENSAVER_MEDIA_KEY = "screensaver_media";
+    static final String SCREENSAVER_CLOCK_SONG_KEY = "screensaver_clock_song";
     static final String AMBIENT_MODE_KEY = "ambient_mode";
     static final String NP_WAVEFORM_KEY = "np_waveform";
     static final String NP_TIMES_KEY = "np_times";
@@ -85,12 +86,21 @@ final class Config {
     static final String NP_BG_OPACITY_KEY = "np_bg_opacity";
     static final String NP_ACCENT_KEY = "np_accent";
     static final String NP_GLOW_KEY = "np_glow";
-    private static final String NP_DESIGN_V2_KEY = "np_design_v2";
-    private static final String NP_DESIGN_V3_KEY = "np_design_v3";
-    private static final String NP_DESIGN_V4_KEY = "np_design_v4";
+    // One migration flag for the redesigned bar. The older np_design_v2/v3/v4 flags were written but
+    // never read; clearing them keeps the prefs file honest.
     private static final String NP_DESIGN_V5_KEY = "np_design_v5";
     static final String NP_SIZE_KEY = "np_size";
+    static final String NP_CORNER_RADIUS_KEY = "np_corner_radius";
+    static final String NP_FULL_STYLE_KEY = "np_full_style";
     static final String NP_OVERLAY_KEY = "np_overlay";
+    static final String SCREENSAVER_PLAYER_MUSIC_ONLY_KEY = "screensaver_player_music_only";
+    static final String NP_BAR_VARIANT_KEY = "np_bar_variant";
+    static final String NP_PREV_KEY = "np_prev";
+    static final String NP_NEXT_KEY = "np_next";
+    static final String AMBIENT_NOW_PLAYING_KEY = "ambient_now_playing";
+    static final String AMBIENT_IDLE_MINUTES_KEY = "ambient_idle_minutes";
+    static final int NP_BAR_STACKED = 0;
+    static final int NP_BAR_EDGE = 1;
     /** Default 40 % see-through: the same glass strength as before, now adjustable. */
     static final int GLASS_TRANSPARENCY_DEFAULT = 15;
 
@@ -103,12 +113,14 @@ final class Config {
             TOP_SHELF_PROGRESS_KEY, TOP_SHELF_AUTO_HIDE_KEY, TOP_SHELF_SOURCES_KEY,
             TOP_SHELF_NOW_PLAYING_KEY, LIVING_WALLPAPER_KEY, NOW_PLAYING_FULL_KEY,
             APP_NAMES_KEY, SMART_STACK_KEY, SMART_STACK_SECONDS_KEY, CONTROL_CENTER_KEY,
-            MEDIA_BACKGROUND_KEY, SCREENSAVER_MEDIA_KEY, FOCUS_MOTION_KEY, FOCUS_GLOSS_KEY,
+            MEDIA_BACKGROUND_KEY, SCREENSAVER_MEDIA_KEY, SCREENSAVER_CLOCK_SONG_KEY,
+            FOCUS_MOTION_KEY, FOCUS_GLOSS_KEY,
             EDIT_JIGGLE_KEY, TOP_BAR_CAPSULE_KEY, DOCK_GAP_KEY, DOCK_BOTTOM_KEY,
             SHELF_SHADOW_KEY, HERO_TITLE_KEY, TILE_BORDER_KEY, AMBIENT_MODE_KEY,
             NP_WAVEFORM_KEY, NP_TIMES_KEY, NP_ALBUM_ART_KEY, NP_SOURCE_KEY, NP_CLOSE_KEY,
             NP_VISUAL_MODE_KEY, NP_BG_STYLE_KEY, NP_BG_OPACITY_KEY, NP_ACCENT_KEY,
-            NP_GLOW_KEY, NP_SIZE_KEY, NP_OVERLAY_KEY, "np_source_text", "np_visualizer", "np_bar_variant",
+            NP_GLOW_KEY, NP_SIZE_KEY, NP_CORNER_RADIUS_KEY, NP_FULL_STYLE_KEY, NP_OVERLAY_KEY,
+            SCREENSAVER_PLAYER_MUSIC_ONLY_KEY, "np_source_text", "np_visualizer", "np_bar_variant",
             "np_prev", "np_next", "ambient_now_playing", "ambient_idle_minutes",
             "screensaver_previous")));
 
@@ -228,6 +240,12 @@ final class Config {
     static boolean screensaverMedia(Context ctx) {
         return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(SCREENSAVER_MEDIA_KEY, false);
+    }
+
+    /** Show the current song title under the Standard clock. */
+    static boolean screensaverClockSong(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(SCREENSAVER_CLOCK_SONG_KEY, true);
     }
 
     /** 0 = still, 1 = slow drift, 2 = quicker drift: local wallpapers move and fade like Aura. */
@@ -372,10 +390,7 @@ final class Config {
                 .putBoolean(NP_SOURCE_KEY, true)
                 .putBoolean(NP_CLOSE_KEY, true)
                 .putBoolean(NOW_PLAYING_FULL_KEY, true)
-                .putBoolean(NP_DESIGN_V2_KEY, true)
                 .putInt(NP_SIZE_KEY, 1)
-                .putBoolean(NP_DESIGN_V3_KEY, true)
-                .putBoolean(NP_DESIGN_V4_KEY, true)
                 .putBoolean(NP_DESIGN_V5_KEY, true)
                 .apply();
     }
@@ -415,6 +430,54 @@ final class Config {
         int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
                 .getInt(NP_SIZE_KEY, 1);
         return Math.max(0, Math.min(3, value));
+    }
+
+    /** Corner radius in dp for both ends of the bar and the cover's left corners, 0..28. */
+    static int npCornerRadius(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_CORNER_RADIUS_KEY, 18);
+        return Math.max(0, Math.min(28, value));
+    }
+
+    static boolean screensaverPlayerMusicOnly(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(SCREENSAVER_PLAYER_MUSIC_ONLY_KEY, true);
+    }
+
+    /** 0 = ambient full-screen player, 1 = classic panel full-screen player. */
+    static int npFullStyle(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_FULL_STYLE_KEY, 0) == 1 ? 1 : 0;
+    }
+
+    /** 0 = the original stacked bar, 1 = the new edge bar. */
+    static int npBarVariant(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_BAR_VARIANT_KEY, NP_BAR_EDGE);
+        return value == NP_BAR_STACKED ? NP_BAR_STACKED : NP_BAR_EDGE;
+    }
+
+    static boolean npPrev(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_PREV_KEY, true);
+    }
+
+    static boolean npNext(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NP_NEXT_KEY, true);
+    }
+
+    /** The ambient full-screen Now Playing screen on Home idle; off unless the owner opts in. */
+    static boolean ambientNowPlaying(Context ctx) {
+        return ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(AMBIENT_NOW_PLAYING_KEY, false);
+    }
+
+    /** Minutes Home may sit idle with music before the ambient player; 0 keeps it off. */
+    static int ambientIdleMinutes(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(AMBIENT_IDLE_MINUTES_KEY, 10);
+        return Math.max(0, Math.min(60, value));
     }
 
     /** 0 Off, 1 Waves, 2 Oscilloscope, 3 Radial Aura, 4 Pulse/orb, 5 Minimal. */

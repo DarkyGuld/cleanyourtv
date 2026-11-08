@@ -40,6 +40,8 @@ final class ThemeFiles {
     }
 
     static boolean collectionImage(String name) {
-        return name != null && !name.startsWith(".") && IMAGE.matcher(name).matches();
+        // WallpaperRotation.images() lists dotfiles too (.hidden.jpg); refusing them here left a picture
+        // that Home shows but ThemeProvider and a theme.sh reset could never delete.
+        return name != null && IMAGE.matcher(name).matches();
     }
 }

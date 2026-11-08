@@ -123,6 +123,7 @@ public class LibraryAppsTest {
         apps.add("org.z.example"); apps.add("com.a.example");
         assertEquals("com.a.example\norg.z.example\n", LibraryApps.encode(apps));
         assertEquals(apps, LibraryApps.decode(LibraryApps.encode(apps)));
+        assertEquals(apps, LibraryApps.decode(LibraryApps.encode(apps).replace("\n", "\r\n")));
         assertEquals(Collections.emptySet(), LibraryApps.decode(""));
     }
 

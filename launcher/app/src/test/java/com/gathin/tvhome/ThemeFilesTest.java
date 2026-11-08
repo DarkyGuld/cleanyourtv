@@ -20,6 +20,9 @@ public class ThemeFilesTest {
     @Test public void collectionImagesAreAllowed() {
         assertEquals("wallpapers/dusk.jpg", ThemeFiles.path(Arrays.asList("wallpapers", "dusk.jpg")));
         assertEquals("wallpapers/Night_2.WEBP", ThemeFiles.path(Arrays.asList("wallpapers", "Night_2.WEBP")));
+        // WallpaperRotation lists dotfiles, so a theme reset must be able to remove them too.
+        assertEquals("wallpapers/.hidden.jpg", ThemeFiles.path(Arrays.asList("wallpapers", ".hidden.jpg")));
+        assertTrue(ThemeFiles.collectionImage(".hidden.jpg"));
     }
 
     @Test public void theCollectionsCaptionsAreAllowed() {

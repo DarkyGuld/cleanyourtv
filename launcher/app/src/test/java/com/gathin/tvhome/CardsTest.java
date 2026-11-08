@@ -425,6 +425,14 @@ public class CardsTest {
     }
 
     @Test
+    public void decodeAcceptsWindowsLineEndings() {
+        String text = Cards.encode(one("io.example.a", DIGEST_A, "show")).replace("\n", "\r\n");
+        Map<String, Cards.Record> out = Cards.decode(text);
+        assertNotNull(out);
+        assertEquals("show", out.get("io.example.a").decision);
+    }
+
+    @Test
     public void emptyStoreRoundTrip() {
         String text = Cards.encode(new TreeMap<>());
         assertEquals("{\"version\":2,\"records\":[\n]}\n", text);

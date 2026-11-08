@@ -62,7 +62,13 @@ public final class LauncherSettingsActivity extends Activity {
     private TextView nowPlayingFullChoice;
     private TextView npWaveformChoice;
     private TextView npSizeChoice;
+    private TextView npCornerRadiusChoice;
+    private TextView npFullStyleChoice;
     private TextView npVisualizerChoice;
+    private TextView npVariantChoice;
+    private TextView npPrevChoice;
+    private TextView npNextChoice;
+    private TextView ambientNowPlayingChoice;
     private TextView npTimesChoice;
     private TextView npAlbumArtChoice;
     private TextView npSourceBadgeChoice;
@@ -72,9 +78,11 @@ public final class LauncherSettingsActivity extends Activity {
     private TextView controlCenterChoice;
     private TextView mediaBackgroundChoice;
     private TextView screensaverMediaChoice;
+    private TextView screensaverClockSongChoice;
     private TextView aerialViewsChoice;
     private TextView screensaverStatusChoice;
     private TextView screensaverAutoStartChoice;
+    private TextView screensaverPlayerMusicChoice;
     private TextView npOverlayChoice;
     private TextView screensaverTestChoice;
     private TextView screensaverNotificationChoice;
@@ -257,6 +265,57 @@ public final class LauncherSettingsActivity extends Activity {
         });
         npSizeChoice = findViewById(R.id.npSizeChoice);
         npSizeChoice.setOnClickListener(v -> showNpSizePicker());
+        npFullStyleChoice = findViewById(R.id.npFullStyleChoice);
+        npFullStyleChoice.setOnClickListener(v -> {
+            choices.edit().putInt(Config.NP_FULL_STYLE_KEY,
+                    Config.npFullStyle(this) == 1 ? 0 : 1).apply();
+            changed();
+            refresh();
+        });
+        npCornerRadiusChoice = findViewById(R.id.npCornerRadiusChoice);
+        npCornerRadiusChoice.setOnClickListener(v -> {
+            int[] values = {0, 6, 12, 18, 24, 28};
+            int current = Config.npCornerRadius(this);
+            int next = values[0];
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] == current) {
+                    next = values[(i + 1) % values.length];
+                    break;
+                }
+            }
+            choices.edit().putInt(Config.NP_CORNER_RADIUS_KEY, next).apply();
+            changed();
+            refresh();
+        });
+        npVariantChoice = findViewById(R.id.npVariantChoice);
+        npVariantChoice.setOnClickListener(v -> {
+            choices.edit().putInt(Config.NP_BAR_VARIANT_KEY,
+                    Config.npBarVariant(this) == Config.NP_BAR_EDGE
+                            ? Config.NP_BAR_STACKED : Config.NP_BAR_EDGE).apply();
+            changed();
+            refresh();
+        });
+        npPrevChoice = findViewById(R.id.npPrevChoice);
+        npPrevChoice.setOnClickListener(v -> {
+            choices.edit().putBoolean(Config.NP_PREV_KEY, !Config.npPrev(this)).apply();
+            changed();
+            refresh();
+        });
+        npNextChoice = findViewById(R.id.npNextChoice);
+        npNextChoice.setOnClickListener(v -> {
+            choices.edit().putBoolean(Config.NP_NEXT_KEY, !Config.npNext(this)).apply();
+            changed();
+            refresh();
+        });
+        ambientNowPlayingChoice = findViewById(R.id.ambientNowPlayingChoice);
+        ambientNowPlayingChoice.setOnClickListener(v -> {
+            int current = Config.ambientNowPlaying(this) ? Config.ambientIdleMinutes(this) : 0;
+            int next = current == 0 ? 5 : current == 5 ? 10 : current == 10 ? 15 : current == 15 ? 30 : 0;
+            choices.edit().putBoolean(Config.AMBIENT_NOW_PLAYING_KEY, next > 0)
+                    .putInt(Config.AMBIENT_IDLE_MINUTES_KEY, next).apply();
+            changed();
+            refresh();
+        });
         npWaveformChoice = findViewById(R.id.npWaveformChoice);
         npWaveformChoice.setOnClickListener(v -> {
             choices.edit().putBoolean(Config.NP_WAVEFORM_KEY, !Config.npWaveform(this)).apply();
@@ -311,10 +370,23 @@ public final class LauncherSettingsActivity extends Activity {
             choices.edit().putBoolean(Config.SCREENSAVER_MEDIA_KEY, !Config.screensaverMedia(this)).apply();
             changed(); refresh();
         });
+        screensaverClockSongChoice = findViewById(R.id.screensaverClockSongChoice);
+        screensaverClockSongChoice.setOnClickListener(v -> {
+            choices.edit().putBoolean(Config.SCREENSAVER_CLOCK_SONG_KEY,
+                    !Config.screensaverClockSong(this)).apply();
+            changed(); refresh();
+        });
         aerialViewsChoice = findViewById(R.id.aerialViewsChoice);
         aerialViewsChoice.setOnClickListener(v -> showScreensaverPicker());
         screensaverStatusChoice = findViewById(R.id.screensaverStatusChoice);
         screensaverAutoStartChoice = findViewById(R.id.screensaverAutoStartChoice);
+        screensaverPlayerMusicChoice = findViewById(R.id.screensaverPlayerMusicChoice);
+        screensaverPlayerMusicChoice.setOnClickListener(v -> {
+            choices.edit().putBoolean(Config.SCREENSAVER_PLAYER_MUSIC_ONLY_KEY,
+                    !Config.screensaverPlayerMusicOnly(this)).apply();
+            changed();
+            refresh();
+        });
         npOverlayChoice = findViewById(R.id.npOverlayChoice);
         npOverlayChoice.setOnClickListener(v -> {
             if (!Settings.canDrawOverlays(this)) {
@@ -495,13 +567,27 @@ public final class LauncherSettingsActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN
-                && event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
             View focus = getCurrentFocus();
-            if (focus instanceof SettingsRow && inside(focus, settingsScroll)
-                    && navItems[Math.max(0, activeSection)].isShown()) {
-                navItems[Math.max(0, activeSection)].requestFocus();
-                return true;
+            if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT) {
+                // Choice chips and the section headings are plain TextViews, not SettingsRow; any
+                // focus inside the content scroll should still return to the active section.
+                if (focus != null && inside(focus, settingsScroll)
+                        && navItems[Math.max(0, activeSection)].isShown()) {
+                    navItems[Math.max(0, activeSection)].requestFocus();
+                    return true;
+                }
+            }
+            if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                for (int i = 0; i < navItems.length; i++) {
+                    if (focus != navItems[i]) continue;
+                    scrollToSection(i);
+                    View row = findViewById(navFirstRowIds[i]);
+                    if (row != null && row.isShown() && row.isEnabled() && row.isFocusable()) {
+                        row.requestFocus();
+                    }
+                    return true;
+                }
             }
         }
         return super.dispatchKeyEvent(event);
@@ -617,9 +703,12 @@ public final class LauncherSettingsActivity extends Activity {
 
     private void showScreensaverPicker() {
         String[] labels = {getString(R.string.screensaver_engine_aerial),
-                getString(R.string.screensaver_engine_clock), getString(R.string.screensaver_engine_tv)};
-        int checked = 2;
-        if (ScreensaverController.clockOwnsDream(this)) checked = 1;
+                getString(R.string.screensaver_engine_clock),
+                getString(R.string.screensaver_engine_player),
+                getString(R.string.screensaver_engine_tv)};
+        int checked = 3;
+        if (ScreensaverController.playerOwnsDream(this)) checked = 2;
+        else if (ScreensaverController.clockOwnsDream(this)) checked = 1;
         else if (ScreensaverController.aerialViewsOwnsDream(this)) checked = 0;
         new AlertDialog.Builder(this, R.style.SettingsDialog)
                 .setTitle(R.string.aerial_views_dialog)
@@ -631,6 +720,8 @@ public final class LauncherSettingsActivity extends Activity {
                         status = ScreensaverController.selectAerialViews(this);
                     } else if (which == 1) {
                         status = ScreensaverController.selectClock(this);
+                    } else if (which == 2) {
+                        status = ScreensaverController.selectPlayer(this);
                     } else {
                         status = ScreensaverController.restoreDefault(this);
                         if (status == ScreensaverController.Status.OK) label = getString(R.string.aerial_views_tv);
@@ -1059,17 +1150,26 @@ public final class LauncherSettingsActivity extends Activity {
 
     private void showWallpaperPicker() {
         File dir = Config.dir(this);
-        List<File> images = new java.util.ArrayList<>(WallpaperRotation.images(
-                dir == null ? null : new File(dir, "wallpapers")));
-        // A theme with a single wallpaper.jpg offers that picture too (Config maps the choice back to it).
+        File collection = dir == null ? null : new File(dir, "wallpapers");
+        List<File> images = new java.util.ArrayList<>(WallpaperRotation.images(collection));
+        List<String> tokens = new java.util.ArrayList<>();
+        for (File image : images) tokens.add(WallpaperRotation.WALLPAPERS_PREFIX + image.getName());
+        // A theme with a single wallpaper.jpg offers that picture too. Prefix it with root/ so a
+        // wallpapers/wallpaper.jpg with the same name can be chosen independently.
         File single = dir == null ? null : new File(dir, Config.WALLPAPER_NAME);
-        if (single != null && single.isFile()) images.add(0, single);
+        if (single != null && single.isFile()) {
+            images.add(0, single);
+            tokens.add(0, WallpaperRotation.ROOT_PREFIX + single.getName());
+        }
         String[] labels = new String[images.size() + 1];
-        for (int i = 0; i < images.size(); i++) labels[i] = images.get(i).getName();
+        for (int i = 0; i < images.size(); i++) {
+            labels[i] = images.get(i) == single ? images.get(i).getName()
+                    : WallpaperRotation.WALLPAPERS_PREFIX + images.get(i).getName();
+        }
         labels[images.size()] = getString(R.string.wallpaper_none);
         String current = choices.getString(Config.WALLPAPER_CHOICE_KEY, null);
         int checked = "none".equals(current) ? images.size()
-                : indexOf(images, current);
+                : indexOfChoice(images, tokens, current);
         new AlertDialog.Builder(this, R.style.SettingsDialog)
                 .setTitle(R.string.wallpaper_label)
                 .setSingleChoiceItems(labels, checked, (dialog, which) -> {
@@ -1078,7 +1178,7 @@ public final class LauncherSettingsActivity extends Activity {
                         choices.edit().putString(Config.WALLPAPER_CHOICE_KEY, "none").apply();
                     } else {
                         choices.edit().putString(Config.WALLPAPER_CHOICE_KEY,
-                                images.get(which).getName()).apply();
+                                tokens.get(which)).apply();
                     }
                     changed();
                     Toast.makeText(this, R.string.wallpaper_applied, Toast.LENGTH_SHORT).show();
@@ -1169,10 +1269,12 @@ public final class LauncherSettingsActivity extends Activity {
         }
     }
 
-    private static int indexOf(List<File> images, String name) {
-        if (name == null) return -1;
+    private static int indexOfChoice(List<File> images, List<String> tokens, String choice) {
+        if (choice == null) return -1;
+        for (int i = 0; i < tokens.size(); i++) if (tokens.get(i).equals(choice)) return i;
+        // A bare name was written before the root/ and wallpapers/ prefixes existed.
         for (int i = 0; i < images.size(); i++) {
-            if (images.get(i).getName().equals(name)) return i;
+            if (images.get(i).getName().equals(choice)) return i;
         }
         return -1;
     }
@@ -1271,6 +1373,10 @@ public final class LauncherSettingsActivity extends Activity {
                 + getString(Config.screensaverMedia(this) ? R.string.on : R.string.off)
                 + (clockSelected ? "" : " · " + getString(R.string.screensaver_clock_only)));
         setRowEnabled(screensaverMediaChoice, clockSelected);
+        screensaverClockSongChoice.setText(getString(R.string.screensaver_clock_song_state,
+                getString(Config.screensaverClockSong(this) ? R.string.on : R.string.off))
+                + (clockSelected ? "" : " · " + getString(R.string.screensaver_clock_only)));
+        setRowEnabled(screensaverClockSongChoice, clockSelected);
         boolean secure = ScreensaverController.hasWriteSecure(this);
         boolean aerialInstalled = ScreensaverController.isInstalled(this,
                 ScreensaverController.AERIAL_PACKAGE);
@@ -1288,6 +1394,8 @@ public final class LauncherSettingsActivity extends Activity {
                 : selected + (ScreensaverController.isEnabled(this) ? "" : " (disabled)");
         screensaverStatusChoice.setText(getString(R.string.screensaver_changed, dreamLabel));
         boolean autoStart = ScreensaverController.autoStartAllowed(this);
+        screensaverPlayerMusicChoice.setText(getString(R.string.screensaver_player_music_only_state,
+                getString(Config.screensaverPlayerMusicOnly(this) ? R.string.on : R.string.off)));
         screensaverAutoStartChoice.setText(getString(R.string.screensaver_auto_start_state,
                 getString(autoStart ? R.string.screensaver_auto_start_allowed
                         : R.string.screensaver_auto_start_blocked))
@@ -1348,6 +1456,22 @@ public final class LauncherSettingsActivity extends Activity {
         npSizeChoice.setText(getString(R.string.np_size_state,
                 getString(size == 0 ? R.string.np_size_compact : size == 1 ? R.string.np_size_balanced
                         : size == 2 ? R.string.np_size_roomy : R.string.np_size_large)));
+        npVariantChoice.setText(getString(R.string.np_variant_state,
+                getString(Config.npBarVariant(this) == Config.NP_BAR_EDGE
+                        ? R.string.np_variant_edge : R.string.np_variant_stacked)));
+        npCornerRadiusChoice.setText(getString(R.string.np_corner_radius_state,
+                Config.npCornerRadius(this)));
+        npFullStyleChoice.setText(getString(R.string.np_full_style_state,
+                getString(Config.npFullStyle(this) == 1
+                        ? R.string.np_full_style_classic : R.string.np_full_style_ambient)));
+        npPrevChoice.setText(getString(R.string.np_prev_state,
+                getString(Config.npPrev(this) ? R.string.on : R.string.off)));
+        npNextChoice.setText(getString(R.string.np_next_state,
+                getString(Config.npNext(this) ? R.string.on : R.string.off)));
+        int ambientMinutes = Config.ambientNowPlaying(this) ? Config.ambientIdleMinutes(this) : 0;
+        ambientNowPlayingChoice.setText(getString(R.string.ambient_now_playing_state,
+                ambientMinutes <= 0 ? getString(R.string.ambient_now_playing_off)
+                        : getString(R.string.ambient_now_playing_minutes, ambientMinutes)));
         npVisualizerChoice.setText(getString(R.string.np_visualizer_state,
                 getString(visualModeLabel(Config.npVisualMode(this)))));
         npTimesChoice.setText(getString(R.string.np_times_state,
@@ -1444,6 +1568,7 @@ public final class LauncherSettingsActivity extends Activity {
                 View child = group.getChildAt(i);
                 if (child instanceof SettingsRow) {
                     SettingsRow row = (SettingsRow) child;
+                    row.setLeadingIcon(leadingIconFor(row.getId()));
                     if (row.isEnabled() && row.isClickable()) row.setChevron(true);
                     else row.clearTrailing();
                 }
@@ -1455,6 +1580,8 @@ public final class LauncherSettingsActivity extends Activity {
         toggle(topShelfAutoHideChoice, Config.topShelfAutoHide(this));
         toggle(nowPlayingFullChoice, Config.nowPlayingFull(this));
         toggle(npWaveformChoice, Config.npWaveform(this));
+        toggle(npPrevChoice, Config.npPrev(this));
+        toggle(npNextChoice, Config.npNext(this));
         toggle(npTimesChoice, Config.npTimes(this));
         toggle(npAlbumArtChoice, Config.npAlbumArt(this));
         toggle(npSourceBadgeChoice, Config.npSource(this));
@@ -1466,11 +1593,54 @@ public final class LauncherSettingsActivity extends Activity {
         toggle(tileBorderChoice, Config.tileBorder(this));
         toggle(controlCenterChoice, Config.controlCenter(this));
         toggle(screensaverMediaChoice, Config.screensaverMedia(this));
+        toggle(screensaverClockSongChoice, Config.screensaverClockSong(this));
         toggle(mediaBackgroundChoice, Config.mediaBackground(this));
         toggle(npOverlayChoice, Config.npOverlay(this));
         toggle(animationsChoice, animations);
         toggle(advancedChoice, advancedEffects);
         toggle(screensaverNotificationChoice, ScreensaverController.notificationAccessEnabled(this));
+        toggle(screensaverPlayerMusicChoice, Config.screensaverPlayerMusicOnly(this));
+    }
+
+    /** The leading tile's icon; rows share their section's mark so the list stays calm. */
+    private int leadingIconFor(int id) {
+        if (id == R.id.clockStyleChoice) return R.drawable.ic_clock;
+        if (id == R.id.dockGapChoice || id == R.id.shelfShadowChoice) return R.drawable.ic_dock;
+        if (id == R.id.iconPackChoice || id == R.id.installedIconPackChoice || id == R.id.iconGlowChoice
+                || id == R.id.appNamesChoice || id == R.id.tileBorderChoice) return R.drawable.ic_apps;
+        if (id == R.id.livingWallpaperChoice || id == R.id.wallpaperChoice
+                || id == R.id.mediaBackgroundChoice) return R.drawable.ic_picture;
+        if (id == R.id.reorderChoice) return R.drawable.ic_swap_vert;
+        if (id == R.id.openOnStartChoice || id == R.id.tvSettingsChoice) return R.drawable.ic_livetv;
+        if (id == R.id.controlCenterChoice) return R.drawable.ic_settings;
+        if (id == R.id.defaultHomeChoice) return R.drawable.ic_home_settings;
+        if (id == R.id.nowPlayingFullChoice || id == R.id.npSizeChoice || id == R.id.npCornerRadiusChoice
+                || id == R.id.npWaveformChoice
+                || id == R.id.npVisualizerChoice || id == R.id.npTimesChoice || id == R.id.npAlbumArtChoice
+                || id == R.id.npSourceBadgeChoice || id == R.id.npCloseChoice
+                || id == R.id.npVariantChoice || id == R.id.npPrevChoice || id == R.id.npNextChoice
+                || id == R.id.npFullStyleChoice || id == R.id.ambientNowPlayingChoice) {
+            return R.drawable.ic_nav_now_playing;
+        }
+        if (id == R.id.topShelfChoice || id == R.id.topShelfSourcesChoice
+                || id == R.id.topShelfNowPlayingChoice || id == R.id.topShelfProgressChoice
+                || id == R.id.topShelfAutoHideChoice || id == R.id.smartStackChoice
+                || id == R.id.smartStackSecondsChoice) return R.drawable.ic_nav_shelf;
+        if (id == R.id.screensaverMediaChoice || id == R.id.screensaverClockSongChoice
+                || id == R.id.aerialViewsChoice
+                || id == R.id.screensaverStatusChoice || id == R.id.screensaverAutoStartChoice
+                || id == R.id.screensaverPlayerMusicChoice
+                || id == R.id.npOverlayChoice || id == R.id.screensaverTestChoice
+                || id == R.id.screensaverNotificationChoice || id == R.id.screensaverOverlayChoice
+                || id == R.id.screensaverRestoreChoice || id == R.id.screensaverMediaAccessChoice
+                || id == R.id.screensaverSleepChoice) return R.drawable.ic_nav_screensaver;
+        if (id == R.id.focusMotionChoice || id == R.id.focusGlossChoice || id == R.id.editJiggleChoice
+                || id == R.id.parallaxChoice || id == R.id.animationsChoice || id == R.id.advancedChoice
+                || id == R.id.ambientModeChoice) return R.drawable.ic_nav_motion;
+        if (id == R.id.followThemeChoice || id == R.id.liquidGlassChoice
+                || id == R.id.glassTransparencyChoice || id == R.id.glassMotionChoice
+                || id == R.id.topBarCapsuleChoice) return R.drawable.ic_nav_appearance;
+        return R.drawable.ic_nav_system;
     }
 
     private void toggle(View row, boolean on) {

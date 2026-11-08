@@ -23,6 +23,7 @@ final class ScreensaverController {
     static final String AERIAL_PACKAGE = "com.neilturner.aerialviews";
     static final String AERIAL_COMPONENT = "com.neilturner.aerialviews/.ui.screensaver.DreamActivity";
     static final String CLOCK_COMPONENT = "com.gathin.tvhome/.ClockDream";
+    static final String PLAYER_COMPONENT = "com.gathin.tvhome/.NowPlayingDream";
     static final String BACKDROP_COMPONENT = "com.google.android.apps.tv.dreamx/.service.Backdrop";
     static final String AERIAL_NOTIFICATION =
             "com.neilturner.aerialviews/com.neilturner.aerialviews.services.NotificationService";
@@ -38,6 +39,10 @@ final class ScreensaverController {
 
     static ComponentName clockComponent() {
         return ComponentName.unflattenFromString(CLOCK_COMPONENT);
+    }
+
+    static ComponentName playerComponent() {
+        return ComponentName.unflattenFromString(PLAYER_COMPONENT);
     }
 
     static ComponentName backdropComponent() {
@@ -71,10 +76,18 @@ final class ScreensaverController {
 
     static boolean hasDreamService(Context context, ComponentName component) {
         if (component == null) return false;
+        PackageManager pm = context.getPackageManager();
+        // A direct component lookup is not filtered like queryIntentServices can be; system
+        // screensavers (DreamX) have no launcher activity, so the intent query may miss them.
+        try {
+            ServiceInfo direct = pm.getServiceInfo(component, 0);
+            if (direct != null) return direct.enabled;
+        } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
+            // Fall through to the intent query for vendors that hide the component name.
+        }
         Intent intent = new Intent(DreamService.SERVICE_INTERFACE).setPackage(component.getPackageName());
         try {
-            for (ResolveInfo info : context.getPackageManager()
-                    .queryIntentServices(intent, PackageManager.GET_SERVICES)) {
+            for (ResolveInfo info : pm.queryIntentServices(intent, PackageManager.GET_SERVICES)) {
                 ServiceInfo service = info.serviceInfo;
                 if (service != null && component.getClassName().equals(service.name)) return service.enabled;
             }
@@ -112,6 +125,14 @@ final class ScreensaverController {
         if (!isEnabled(context)) return false;
         for (ComponentName name : selectedComponents(context)) {
             if (aerialComponent().equals(name)) return true;
+        }
+        return false;
+    }
+
+    static boolean playerOwnsDream(Context context) {
+        if (!isEnabled(context)) return false;
+        for (ComponentName name : selectedComponents(context)) {
+            if (playerComponent().equals(name)) return true;
         }
         return false;
     }
@@ -159,22 +180,37 @@ final class ScreensaverController {
         return select(context, clockComponent());
     }
 
-    /** Restore the previous selection, then the firmware default. Never writes screensaver_default_component. */
+    static Status selectPlayer(Context context) {
+        return select(context, playerComponent());
+    }
+
+    /** The firmware default first, then the previous selection. Never writes screensaver_default_component. */
     static Status restoreDefault(Context context) {
-        ComponentName previous = ComponentName.unflattenFromString(
-                prefs(context).getString("screensaver_previous", ""));
-        // Never "restore" AerialViews: the owner pressed Restore TV default.
-        if (previous != null && previous.equals(aerialComponent())) previous = null;
-        if (previous != null && isInstalled(context, previous.getPackageName())
-                && hasDreamService(context, previous)) {
-            Status restored = select(context, previous);
-            if (restored == Status.OK) return restored;
-        }
         String raw = secure(context, "screensaver_default_component");
         ComponentName fallback = ComponentName.unflattenFromString(raw == null ? "" : raw);
         if (fallback == null) fallback = backdropComponent();
+        // A non-null secure default is the firmware's own answer; trust it even if package
+        // visibility hides the package from getApplicationInfo on this build.
+        boolean trustedDefault = fallback != null
+                && (raw != null || isInstalled(context, fallback.getPackageName()));
+        if (!trustedDefault) {
+            // Firmware without the advertised default: go back to the prior selection, if any.
+            ComponentName previous = ComponentName.unflattenFromString(
+                    prefs(context).getString("screensaver_previous", ""));
+            if (previous != null && !previous.equals(aerialComponent())
+                    && isInstalled(context, previous.getPackageName())
+                    && hasDreamService(context, previous)) {
+                fallback = previous;
+            } else {
+                // Last resort on a firmware with neither Backdrop nor a prior selection.
+                fallback = clockComponent();
+            }
+        }
         if (!isInstalled(context, fallback.getPackageName())) return Status.NOT_INSTALLED;
-        if (!hasDreamService(context, fallback)) return Status.NO_DREAM_SERVICE;
+        // The firmware's own advertised default is trusted even when package visibility hides
+        // its DreamService from this app (some Google TV builds do exactly that). A fallback
+        // previous selection was already checked with hasDreamService above.
+        if (!trustedDefault && !hasDreamService(context, fallback)) return Status.NO_DREAM_SERVICE;
         if (!hasWriteSecure(context)) return Status.NO_PERMISSION;
         try {
             boolean written = Settings.Secure.putString(context.getContentResolver(),
@@ -288,11 +324,14 @@ final class ScreensaverController {
         List<ComponentName> selected = selectedComponents(context);
         if (selected.isEmpty()) return "";
         ComponentName name = selected.get(0);
-        if (aerialComponent().equals(name)) return "AerialViews";
-        if (clockComponent().equals(name)) return "Clock";
+        if (aerialComponent().equals(name)) return context.getString(R.string.screensaver_engine_aerial);
+        if (clockComponent().equals(name)) return context.getString(R.string.screensaver_engine_clock);
+        if (playerComponent().equals(name)) return context.getString(R.string.screensaver_engine_player);
         ComponentName fallback = ComponentName.unflattenFromString(
                 secure(context, "screensaver_default_component"));
-        if (name.equals(fallback) || backdropComponent().equals(name)) return "TV default";
+        if (name.equals(fallback) || backdropComponent().equals(name)) {
+            return context.getString(R.string.screensaver_engine_tv);
+        }
         return name.flattenToShortString();
     }
 

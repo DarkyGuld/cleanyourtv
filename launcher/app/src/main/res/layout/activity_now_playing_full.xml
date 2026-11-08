@@ -5,11 +5,12 @@
     android:layout_height="match_parent"
     android:background="#FF06080B">
 
+    <!-- The softened artwork is a 48 x 27 image stretched with bilinear filtering: no RenderEffect. -->
     <ImageView
         android:id="@+id/fullBackground"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:alpha="0.34"
+        android:alpha="0.46"
         android:scaleType="centerCrop"
         android:importantForAccessibility="no" />
 
@@ -18,157 +19,133 @@
         android:layout_height="match_parent"
         android:background="@drawable/now_playing_full_scrim" />
 
+    <!-- One column: the art takes whatever height the text and transport leave over, so the
+         composition is never taller than the screen. Everything below the art is fixed height. -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:gravity="center"
+        android:layout_height="match_parent"
+        android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:paddingStart="100dp"
-        android:paddingEnd="100dp">
+        android:paddingStart="72dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="72dp"
+        android:paddingBottom="24dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <com.gathin.tvhome.SquareImageView
+                android:id="@+id/fullArt"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:background="@drawable/now_playing_full_art_bg"
+                android:clipToOutline="true"
+                android:contentDescription="@string/now_playing"
+                android:elevation="18dp"
+                android:scaleType="centerCrop" />
+        </FrameLayout>
 
         <TextView
-            android:layout_width="wrap_content"
+            android:id="@+id/fullTitle"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="18dp"
-            android:letterSpacing="0.18"
-            android:text="@string/now_playing"
-            android:textAllCaps="true"
-            android:textColor="#99FFFFFF"
-            android:textSize="13sp"
+            android:layout_marginTop="16dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="28sp"
             android:fontFamily="@string/font_medium" />
+
+        <TextView
+            android:id="@+id/fullArtist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="#B3FFFFFF"
+            android:textSize="17sp" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <ImageView
-                android:id="@+id/fullArt"
-                android:layout_width="360dp"
-                android:layout_height="360dp"
-                android:background="@drawable/now_playing_full_art_bg"
-                android:clipToOutline="true"
-                android:contentDescription="@string/now_playing"
-                android:elevation="14dp"
-                android:scaleType="centerCrop" />
-
-            <LinearLayout
-                android:layout_width="0dp"
+            <TextView
+                android:id="@+id/fullElapsed"
+                android:layout_width="52dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="34dp"
+                android:gravity="end"
+                android:textColor="#99FFFFFF"
+                android:textSize="13sp"
+                android:fontFamily="monospace" />
+
+            <com.gathin.tvhome.WaveformSeekBar
+                android:id="@+id/fullWaveform"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="14dp"
+                android:layout_marginEnd="14dp"
                 android:layout_weight="1"
-                android:background="@drawable/now_playing_full_panel"
-                android:clipToOutline="true"
-                android:orientation="vertical"
-                android:paddingStart="36dp"
-                android:paddingTop="32dp"
-                android:paddingEnd="36dp"
-                android:paddingBottom="30dp">
+                android:focusable="true"
+                android:contentDescription="@string/now_playing" />
 
-                <TextView
-                    android:id="@+id/fullTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="2"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="40sp"
-                    android:fontFamily="@string/font_medium" />
-
-                <TextView
-                    android:id="@+id/fullArtist"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:ellipsize="end"
-                    android:maxLines="2"
-                    android:textColor="#B3FFFFFF"
-                    android:textSize="19sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="30dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/fullElapsed"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textColor="#99FFFFFF"
-                        android:textSize="14sp" />
-
-                    <com.gathin.tvhome.WaveformSeekBar
-                        android:id="@+id/fullWaveform"
-                        android:layout_width="0dp"
-                        android:layout_height="44dp"
-                        android:layout_marginStart="18dp"
-                        android:layout_marginEnd="18dp"
-                        android:layout_weight="1"
-                        android:focusable="true"
-                        android:contentDescription="@string/now_playing" />
-
-                    <TextView
-                        android:id="@+id/fullDuration"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textColor="#99FFFFFF"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="26dp"
-                    android:gravity="center"
-                    android:orientation="horizontal">
-
-                    <ImageButton
-                        android:id="@+id/fullPrev"
-                        android:layout_width="58dp"
-                        android:layout_height="58dp"
-                        android:background="@drawable/now_playing_button_bg"
-                        android:contentDescription="@string/previous"
-                        android:padding="16dp"
-                        android:src="@drawable/ic_previous" />
-
-                    <ImageButton
-                        android:id="@+id/fullPlay"
-                        android:layout_width="74dp"
-                        android:layout_height="74dp"
-                        android:layout_marginStart="22dp"
-                        android:layout_marginEnd="22dp"
-                        android:background="@drawable/now_playing_button_bg"
-                        android:contentDescription="@string/pause"
-                        android:padding="22dp"
-                        android:src="@drawable/ic_pause" />
-
-                    <ImageButton
-                        android:id="@+id/fullNext"
-                        android:layout_width="58dp"
-                        android:layout_height="58dp"
-                        android:background="@drawable/now_playing_button_bg"
-                        android:contentDescription="@string/next"
-                        android:padding="16dp"
-                        android:src="@drawable/ic_next" />
-                </LinearLayout>
-            </LinearLayout>
+            <TextView
+                android:id="@+id/fullDuration"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:textColor="#99FFFFFF"
+                android:textSize="13sp"
+                android:fontFamily="monospace" />
         </LinearLayout>
 
-        <TextView
-            android:layout_width="match_parent"
+        <LinearLayout
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="10dp"
             android:gravity="center"
-            android:text="@string/back_to_close"
-            android:textColor="#66FFFFFF"
-            android:textSize="13sp" />
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/fullPrev"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/now_playing_button_bg"
+                android:contentDescription="@string/previous"
+                android:padding="14dp"
+                android:src="@drawable/ic_previous" />
+
+            <ImageButton
+                android:id="@+id/fullPlay"
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:layout_marginStart="18dp"
+                android:layout_marginEnd="18dp"
+                android:background="@drawable/now_playing_play_bg"
+                android:contentDescription="@string/pause"
+                android:padding="17dp"
+                android:tint="#FF111318"
+                android:src="@drawable/ic_pause" />
+
+            <ImageButton
+                android:id="@+id/fullNext"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/now_playing_button_bg"
+                android:contentDescription="@string/next"
+                android:padding="14dp"
+                android:src="@drawable/ic_next" />
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- Last child: the scrim and the panel below must not cover its focus ring. -->
+    <!-- Last child: the scrim and the column below must not cover its focus ring. -->
     <ImageButton
         android:id="@+id/fullClose"
         android:layout_width="48dp"

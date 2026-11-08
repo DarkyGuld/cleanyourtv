@@ -330,7 +330,13 @@
                         android:fontFamily="@string/font_medium" />
 
                     <com.gathin.tvhome.SettingsRow android:id="@+id/nowPlayingFullChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/npVariantChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npSizeChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/npCornerRadiusChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/npFullStyleChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/npPrevChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/npNextChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/ambientNowPlayingChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npWaveformChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npVisualizerChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npTimesChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
@@ -352,6 +358,7 @@
                         android:fontFamily="@string/font_medium" />
 
                     <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverMediaChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverClockSongChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/aerialViewsChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow
                         android:id="@+id/screensaverStatusChoice"
@@ -365,6 +372,7 @@
                         android:layout_marginTop="10dp"
                         android:clickable="false"
                         android:focusable="false" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverPlayerMusicChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npOverlayChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverTestChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/screensaverNotificationChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />

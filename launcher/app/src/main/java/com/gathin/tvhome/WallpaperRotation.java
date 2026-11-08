@@ -51,10 +51,23 @@ final class WallpaperRotation {
     static List<File> chosen(List<File> collection, File single, String choice) {
         if (choice == null) return null;
         if (CHOICE_NONE.equals(choice)) return Collections.emptyList();
-        File picked = find(collection, choice);
-        if (picked == null && single != null && choice.equals(single.getName())) picked = single;
+        File picked;
+        if (choice.startsWith(WALLPAPERS_PREFIX)) {
+            picked = find(collection, choice.substring(WALLPAPERS_PREFIX.length()));
+        } else if (choice.startsWith(ROOT_PREFIX)) {
+            String name = choice.substring(ROOT_PREFIX.length());
+            picked = single != null && single.getName().equals(name) ? single : null;
+        } else {
+            // A bare name is an older saved choice: the collection came first when it was written.
+            picked = find(collection, choice);
+            if (picked == null && single != null && choice.equals(single.getName())) picked = single;
+        }
         return picked == null ? null : Collections.singletonList(picked);
     }
+
+    /** Prefixes for a choice that must name the collection or the root wallpaper, not just its file name. */
+    static final String WALLPAPERS_PREFIX = "wallpapers/";
+    static final String ROOT_PREFIX = "root/";
 
     static File pick(List<File> images, String previous, Random random) {
         List<File> candidates = new ArrayList<>(images);

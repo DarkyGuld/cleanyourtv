@@ -26,6 +26,14 @@ public class OrderTest {
     }
 
     @Test
+    public void decodeAcceptsWindowsLineEndings() {
+        Order o = new Order(Order.dockKey(DOCK), Arrays.asList("b/.B", "a/.A", "c/.C"), 2);
+        Order back = Order.decode(Order.encode(o).replace("\n", "\r\n"));
+        assertEquals(2, back.docked);
+        assertEquals(o.keys, back.keys);
+    }
+
+    @Test
     public void dockedRoundTrips() {
         Order o = new Order(Order.dockKey(DOCK), Arrays.asList("b/.B", "a/.A", "c/.C"), 2);
         String text = Order.encode(o);
