@@ -9,7 +9,6 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.Outline;
-import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.view.ViewOutlineProvider;
 import android.media.MediaMetadata;
@@ -373,6 +372,13 @@ final class NowPlaying {
         boolean edge = Config.npBarVariant(activity) == Config.NP_BAR_EDGE;
         int cover = dp(heights[size]);
         coverWidth = cover;
+        // Edge timeline: start at the album art's right edge and run to the bar's end.
+        // Stacked keeps its progress row centred in the middle of the bar.
+        if (progressRow != null) {
+            int pad = Config.npBarVariant(activity) == Config.NP_BAR_EDGE
+                    ? coverWidth + dp(8) : 0;
+            progressRow.setPadding(pad, 0, dp(14), 0);
+        }
         ViewGroup.LayoutParams boxLp = coverBox.getLayoutParams();
         if (boxLp.width != cover || boxLp.height != ViewGroup.LayoutParams.MATCH_PARENT) {
             boxLp.width = cover;
@@ -416,23 +422,6 @@ final class NowPlaying {
             playLp.width = playSize;
             playLp.height = playSize;
             play.setLayoutParams(playLp);
-        }
-        card.post(this::alignTimeline);
-    }
-
-    /** Edge: the bottom timeline begins after the play icon; Stacked centres it in the bar. */
-    private void alignTimeline() {
-        if (progressRow == null || play == null || card == null) return;
-        if (Config.npBarVariant(activity) != Config.NP_BAR_EDGE) {
-            progressRow.setPadding(0, 0, 0, 0);
-            return;
-        }
-        Rect r = new Rect();
-        card.offsetDescendantRectToMyCoords(play, r);
-        int start = Math.max(0, r.right + dp(4));
-        int end = dp(14);
-        if (progressRow.getPaddingLeft() != start || progressRow.getPaddingRight() != end) {
-            progressRow.setPadding(start, 0, end, 0);
         }
     }
 
