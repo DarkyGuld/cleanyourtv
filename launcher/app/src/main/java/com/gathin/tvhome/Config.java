@@ -92,6 +92,7 @@ final class Config {
     static final String NP_SIZE_KEY = "np_size";
     static final String NP_CORNER_RADIUS_KEY = "np_corner_radius";
     static final String NP_FULL_STYLE_KEY = "np_full_style";
+    static final String NP_IDLE_MINUTES_KEY = "np_idle_minutes";
     static final String NP_OVERLAY_KEY = "np_overlay";
     static final String SCREENSAVER_PLAYER_MUSIC_ONLY_KEY = "screensaver_player_music_only";
     static final String NP_BAR_VARIANT_KEY = "np_bar_variant";
@@ -119,7 +120,8 @@ final class Config {
             SHELF_SHADOW_KEY, HERO_TITLE_KEY, TILE_BORDER_KEY, AMBIENT_MODE_KEY,
             NP_WAVEFORM_KEY, NP_TIMES_KEY, NP_ALBUM_ART_KEY, NP_SOURCE_KEY, NP_CLOSE_KEY,
             NP_VISUAL_MODE_KEY, NP_BG_STYLE_KEY, NP_BG_OPACITY_KEY, NP_ACCENT_KEY,
-            NP_GLOW_KEY, NP_SIZE_KEY, NP_CORNER_RADIUS_KEY, NP_FULL_STYLE_KEY, NP_OVERLAY_KEY,
+            NP_GLOW_KEY, NP_SIZE_KEY, NP_CORNER_RADIUS_KEY, NP_FULL_STYLE_KEY,
+            NP_IDLE_MINUTES_KEY, NP_OVERLAY_KEY,
             SCREENSAVER_PLAYER_MUSIC_ONLY_KEY, "np_source_text", "np_visualizer", "np_bar_variant",
             "np_prev", "np_next", "ambient_now_playing", "ambient_idle_minutes",
             "screensaver_previous")));
@@ -391,6 +393,7 @@ final class Config {
                 .putBoolean(NP_CLOSE_KEY, true)
                 .putBoolean(NOW_PLAYING_FULL_KEY, true)
                 .putInt(NP_SIZE_KEY, 1)
+                .putInt(NP_IDLE_MINUTES_KEY, 5)
                 .putBoolean(NP_DESIGN_V5_KEY, true)
                 .apply();
     }
@@ -430,6 +433,13 @@ final class Config {
         int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
                 .getInt(NP_SIZE_KEY, 1);
         return Math.max(0, Math.min(3, value));
+    }
+
+    /** Minutes without music before the bar goes away; 0 = never. Default 5. */
+    static int npIdleMinutes(Context ctx) {
+        int value = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE)
+                .getInt(NP_IDLE_MINUTES_KEY, 5);
+        return value <= 0 ? 0 : Math.min(120, value);
     }
 
     /** Corner radius in dp for both ends of the bar and the cover's left corners, 0..28. */

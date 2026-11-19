@@ -1,9 +1,11 @@
 package com.gathin.tvhome;
 
 import android.app.Activity;
+import android.graphics.Bitmap;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.KeyEvent;
-import android.view.MotionEvent;
 import android.view.View;
 import android.widget.TextView;
 
@@ -18,8 +20,18 @@ public class ClockActivity extends Activity {
         super.attachBaseContext(LauncherLocale.wrap(base));   // locale
     }
 
-
     private ClockScene scene;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private boolean resumed;
+    private String lastSong;
+    private Bitmap lastArt;
+
+    private final Runnable refresh = new Runnable() {
+        @Override public void run() {
+            loadMedia();
+            if (resumed) handler.postDelayed(this, 1200);
+        }
+    };
 
     @Override
     @SuppressWarnings("deprecation")
@@ -39,35 +51,54 @@ public class ClockActivity extends Activity {
         scene = new ClockScene(getWindow().getDecorView());
         // Start with the wallpaper/glow at once; the media session is read off the main thread.
         scene.useHomeWallpaper(this);
+        loadMedia();
+    }
+
+    private void loadMedia() {
+        if (scene == null || isFinishing() || isDestroyed()) return;
         scene.loadMediaArt(this, media -> {
             if (isFinishing() || isDestroyed()) return;
-            if (media == null) return;
-            if (Config.screensaverMedia(this) && media.bitmap != null) {
+            TextView title = findViewById(R.id.dreamMediaTitle);
+            if (title == null) return;
+            if (media == null || !Config.screensaverClockSong(this)) {
+                lastSong = null;
+                title.setVisibility(View.GONE);
+                return;
+            }
+            if (Config.screensaverMedia(this) && media.bitmap != null && media.bitmap != lastArt) {
+                lastArt = media.bitmap;
                 scene.useMediaArt(media.bitmap);
             }
-            if (!Config.screensaverClockSong(this)) return;
-            TextView mediaTitle = findViewById(R.id.dreamMediaTitle);
-            if (mediaTitle != null) {
-                String text = media.title == null ? "" : media.title;
-                if (media.artist != null && !media.artist.trim().isEmpty()) {
-                    text += (text.isEmpty() ? "" : "  ·  ") + media.artist;
-                }
-                if (!text.trim().isEmpty()) {
-                    mediaTitle.setText(text);
-                    mediaTitle.setVisibility(View.VISIBLE);
-                }
+            String text = media.title == null ? "" : media.title;
+            if (media.artist != null && !media.artist.trim().isEmpty()) {
+                text += (text.isEmpty() ? "" : "  ·  ") + media.artist;
             }
+            if (text.trim().isEmpty()) {
+                lastSong = null;
+                title.setVisibility(View.GONE);
+                return;
+            }
+            if (!text.equals(lastSong)) {
+                lastSong = text;
+                title.setText(text);
+            }
+            title.setVisibility(View.VISIBLE);
         });
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         scene.start();
+        handler.removeCallbacks(refresh);
+        handler.post(refresh);
     }
 
     @Override
     protected void onPause() {
+        resumed = false;
+        handler.removeCallbacks(refresh);
         scene.stop();
         super.onPause();
         finish();   // never left behind in the back stack
@@ -75,6 +106,8 @@ public class ClockActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        handler.removeCallbacks(refresh);
+        lastArt = null;
         if (scene != null) scene.close();
         super.onDestroy();
     }
@@ -88,25 +121,5 @@ public class ClockActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    @Override
-    public boolean dispatchGenericMotionEvent(MotionEvent event) {
-        finish();
-        return true;
-    }
-
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent event) {
-        // Touch TVs/projectors have no key to wake the clock.
-        finish();
-        return true;
-    }
-
-    @Override
-    @SuppressWarnings("deprecation")
-    public void finish() {
-        super.finish();
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
     }
 }

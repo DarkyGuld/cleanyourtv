@@ -64,6 +64,7 @@ public final class LauncherSettingsActivity extends Activity {
     private TextView npSizeChoice;
     private TextView npCornerRadiusChoice;
     private TextView npFullStyleChoice;
+    private TextView npIdleChoice;
     private TextView npVisualizerChoice;
     private TextView npVariantChoice;
     private TextView npPrevChoice;
@@ -272,6 +273,8 @@ public final class LauncherSettingsActivity extends Activity {
             changed();
             refresh();
         });
+        npIdleChoice = findViewById(R.id.npIdleChoice);
+        npIdleChoice.setOnClickListener(v -> showNpIdlePicker());
         npCornerRadiusChoice = findViewById(R.id.npCornerRadiusChoice);
         npCornerRadiusChoice.setOnClickListener(v -> {
             int[] values = {0, 6, 12, 18, 24, 28};
@@ -816,6 +819,28 @@ public final class LauncherSettingsActivity extends Activity {
                 .setSingleChoiceItems(labels, Config.npBarSize(this), (dialog, which) -> {
                     dialog.dismiss();
                     choices.edit().putInt(Config.NP_SIZE_KEY, which).apply();
+                    changed(); refresh();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showNpIdlePicker() {
+        final int[] values = {1, 5, 10, 15, 30, 60, 0};
+        String[] labels = new String[values.length];
+        int checked = 0;
+        int current = Config.npIdleMinutes(this);
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == 0) labels[i] = getString(R.string.np_idle_never);
+            else if (values[i] == 60) labels[i] = getString(R.string.np_idle_hour);
+            else labels[i] = getString(R.string.np_idle_minutes, values[i]);
+            if (values[i] == current) checked = i;
+        }
+        new AlertDialog.Builder(this, R.style.SettingsDialog)
+                .setTitle(R.string.np_idle_label)
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    dialog.dismiss();
+                    choices.edit().putInt(Config.NP_IDLE_MINUTES_KEY, values[which]).apply();
                     changed(); refresh();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -1464,6 +1489,11 @@ public final class LauncherSettingsActivity extends Activity {
         npFullStyleChoice.setText(getString(R.string.np_full_style_state,
                 getString(Config.npFullStyle(this) == 1
                         ? R.string.np_full_style_classic : R.string.np_full_style_ambient)));
+        int idle = Config.npIdleMinutes(this);
+        String idleValue = idle <= 0 ? getString(R.string.np_idle_never)
+                : idle == 60 ? getString(R.string.np_idle_hour)
+                : getString(R.string.np_idle_minutes, idle);
+        npIdleChoice.setText(getString(R.string.np_idle_state, idleValue));
         npPrevChoice.setText(getString(R.string.np_prev_state,
                 getString(Config.npPrev(this) ? R.string.on : R.string.off)));
         npNextChoice.setText(getString(R.string.np_next_state,
@@ -1619,7 +1649,8 @@ public final class LauncherSettingsActivity extends Activity {
                 || id == R.id.npVisualizerChoice || id == R.id.npTimesChoice || id == R.id.npAlbumArtChoice
                 || id == R.id.npSourceBadgeChoice || id == R.id.npCloseChoice
                 || id == R.id.npVariantChoice || id == R.id.npPrevChoice || id == R.id.npNextChoice
-                || id == R.id.npFullStyleChoice || id == R.id.ambientNowPlayingChoice) {
+                || id == R.id.npFullStyleChoice || id == R.id.npIdleChoice
+                || id == R.id.ambientNowPlayingChoice) {
             return R.drawable.ic_nav_now_playing;
         }
         if (id == R.id.topShelfChoice || id == R.id.topShelfSourcesChoice

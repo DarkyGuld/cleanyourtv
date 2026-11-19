@@ -1,6 +1,7 @@
 package com.gathin.tvhome;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -94,8 +95,14 @@ public final class NowPlayingFullActivity extends Activity {
         ImageButton previous = findViewById(R.id.fullPrev);
         ImageButton next = findViewById(R.id.fullNext);
         ImageButton close = findViewById(R.id.fullClose);
+        ImageButton style = findViewById(R.id.fullStyle);
 
         close.setOnClickListener(v -> finishIfAllowed());
+        style.setOnClickListener(v -> showStylePicker());
+        style.setNextFocusRightId(R.id.fullClose);
+        style.setNextFocusDownId(R.id.fullPlay);
+        play.setNextFocusUpId(R.id.fullStyle);
+        close.setNextFocusLeftId(R.id.fullStyle);
         previous.setNextFocusRightId(R.id.fullPlay);
         previous.setNextFocusDownId(R.id.fullWaveform);
         play.setNextFocusLeftId(R.id.fullPrev);
@@ -163,6 +170,23 @@ public final class NowPlayingFullActivity extends Activity {
         super.onWindowFocusChanged(hasFocus);
         // The first post can run before the window takes focus; ask again once it has.
         if (hasFocus && play != null) play.post(play::requestFocus);
+    }
+
+    private void showStylePicker() {
+        String[] labels = {getString(R.string.np_full_style_ambient),
+                getString(R.string.np_full_style_classic)};
+        int current = Config.npFullStyle(this);
+        new AlertDialog.Builder(this, R.style.SettingsDialog)
+                .setTitle(R.string.np_full_style_label)
+                .setSingleChoiceItems(labels, current, (dialog, which) -> {
+                    dialog.dismiss();
+                    if (which == current) return;
+                    getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).edit()
+                            .putInt(Config.NP_FULL_STYLE_KEY, which).apply();
+                    recreate();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     private void transport(MediaController target, Consumer<MediaController.TransportControls> action) {

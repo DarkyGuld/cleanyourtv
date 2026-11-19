@@ -182,4 +182,20 @@
         android:tint="#CCFFFFFF"
         android:elevation="24dp"
         android:contentDescription="@string/close_now_playing" />
+
+    <!-- Opens the Ambient/Classic design picker without leaving the player. -->
+    <ImageButton
+        android:id="@+id/fullStyle"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="top|start"
+        android:layout_marginTop="22dp"
+        android:layout_marginStart="26dp"
+        android:background="@drawable/now_playing_icon_button"
+        android:src="@drawable/ic_settings"
+        android:padding="11dp"
+        android:tint="#CCFFFFFF"
+        android:elevation="24dp"
+        android:contentDescription="@string/np_full_style_label" />
+
 </FrameLayout>

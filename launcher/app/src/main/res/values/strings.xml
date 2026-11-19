@@ -203,6 +203,11 @@
     <string name="np_size_state">Bar size: %1$s</string>
     <string name="np_corner_radius_label">Corner radius</string>
     <string name="np_corner_radius_state">Corner radius: %1$d dp</string>
+    <string name="np_idle_label">Hide without music</string>
+    <string name="np_idle_state">Hide without music: %1$s</string>
+    <string name="np_idle_never">Never</string>
+    <string name="np_idle_minutes">%1$d min</string>
+    <string name="np_idle_hour">1 hour</string>
     <string name="np_full_style_label">Full-screen style</string>
     <string name="np_full_style_ambient">Ambient</string>
     <string name="np_full_style_classic">Classic</string>

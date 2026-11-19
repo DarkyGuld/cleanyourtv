@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.Outline;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.view.ViewOutlineProvider;
 import android.media.MediaMetadata;
@@ -111,6 +112,11 @@ final class NowPlaying {
     private boolean metadataGracePending;
     /** The session the owner dismissed with the bar's X; the bar returns when the track changes. */
     private String dismissedKey;
+    /** False until music is actually playing: a paused session at boot/restart must not show the bar. */
+    private static boolean playedSinceBoot;
+    /** When music last went from playing to paused, for the configurable idle timeout. */
+    private static long lastPlayedAt;
+    private final Runnable idleHide = this::hideIfIdle;
 
     private final MediaController.Callback callback = new MediaController.Callback() {
         @Override public void onMetadataChanged(MediaMetadata metadata) { update(); }
@@ -129,6 +135,9 @@ final class NowPlaying {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             if (!visible || !spaceVisible) return;
+            // Keep the idle clock at the last moment music was actually playing, not at the
+            // last metadata event; otherwise a long track would hide immediately on pause.
+            if (activePlayback(active)) lastPlayedAt = SystemClock.elapsedRealtime();
             updateProgress();
             handler.postDelayed(this, 500);
         }
@@ -408,6 +417,23 @@ final class NowPlaying {
             playLp.height = playSize;
             play.setLayoutParams(playLp);
         }
+        card.post(this::alignTimeline);
+    }
+
+    /** Edge: the bottom timeline begins after the play icon; Stacked centres it in the bar. */
+    private void alignTimeline() {
+        if (progressRow == null || play == null || card == null) return;
+        if (Config.npBarVariant(activity) != Config.NP_BAR_EDGE) {
+            progressRow.setPadding(0, 0, 0, 0);
+            return;
+        }
+        Rect r = new Rect();
+        card.offsetDescendantRectToMyCoords(play, r);
+        int start = Math.max(0, r.right + dp(4));
+        int end = dp(14);
+        if (progressRow.getPaddingLeft() != start || progressRow.getPaddingRight() != end) {
+            progressRow.setPadding(start, 0, end, 0);
+        }
     }
 
     /** Background style/opacity/accent/glow, changed live without recreating the view. */
@@ -450,11 +476,16 @@ final class NowPlaying {
         artFrame.setBackground(cover);
         artFrame.setClipToOutline(true);
         if (progressRow != null) {
-            GradientDrawable scrim = new GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM,
-                    new int[]{0x00000000, 0xCC000000});
-            scrim.setCornerRadii(new float[]{0, 0, 0, 0, radius, radius, radius, radius});
-            progressRow.setBackground(scrim);
+            if (appliedVariant == Config.NP_BAR_EDGE) {
+                GradientDrawable scrim = new GradientDrawable(
+                        GradientDrawable.Orientation.TOP_BOTTOM,
+                        new int[]{0x00000000, 0xCC000000});
+                scrim.setCornerRadii(new float[]{0, 0, 0, 0, radius, radius, radius, radius});
+                progressRow.setBackground(scrim);
+            } else {
+                // Stacked keeps its progress row in the centre, over the bar background.
+                progressRow.setBackground(null);
+            }
         }
         // clipToOutline alone can fall back to a square outline when the background is replaced
         // at runtime; an explicit rounded outline keeps both ends identical.
@@ -618,6 +649,7 @@ final class NowPlaying {
         handler.removeCallbacks(tick);
         handler.removeCallbacks(retrySessions);
         handler.removeCallbacks(sendSeek);
+        handler.removeCallbacks(idleHide);
         cancelMetadataGrace();
         pendingSeekMs = -1;
         visualSource.setPlaying(false);
@@ -680,6 +712,7 @@ final class NowPlaying {
         handler.removeCallbacks(tick);
         handler.removeCallbacks(retrySessions);
         handler.removeCallbacks(sendSeek);
+        handler.removeCallbacks(idleHide);
         cancelMetadataGrace();
         pendingSeekMs = -1;
         visualSource.setPlaying(false);
@@ -715,6 +748,15 @@ final class NowPlaying {
         applyConfig();
         position();
         refreshGlass();
+        handler.removeCallbacks(idleHide);
+        if (active != null && !activePlayback(active)) {
+            long idle = idleMillis();
+            if (idle > 0) {
+                long remaining = lastPlayedAt + idle - SystemClock.elapsedRealtime();
+                if (remaining > 0) handler.postDelayed(idleHide, remaining);
+                else hideIfIdle();
+            }
+        }
     }
 
     /** Re-bakes the glass over the current wallpaper; cheap enough to call when it rotates. */
@@ -844,11 +886,19 @@ final class NowPlaying {
                 return;
             }
             cancelMetadataGrace();
+            handler.removeCallbacks(idleHide);
+            playedSinceBoot = false;
             show(null);
             return;
         }
         active = chosen;
         if (dismissedKey != null && dismissedKey.equals(sessionKey(chosen))) {
+            cancelMetadataGrace();
+            active = null;
+            show(null);
+            return;
+        }
+        if (!shouldShow(chosen)) {
             cancelMetadataGrace();
             active = null;
             show(null);
@@ -929,6 +979,66 @@ final class NowPlaying {
         show(chosen);
         waveform.setAccent(coverAccent);
         updateProgress();
+    }
+
+    /** Playing/buffering counts as "started"; a paused session does not show the bar on its own. */
+    private boolean activePlayback(MediaController controller) {
+        if (controller == null) return false;
+        try {
+            PlaybackState state = controller.getPlaybackState();
+            int value = state == null ? PlaybackState.STATE_NONE : state.getState();
+            return value == PlaybackState.STATE_PLAYING
+                    || value == PlaybackState.STATE_BUFFERING
+                    || value == PlaybackState.STATE_CONNECTING;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private long idleMillis() {
+        return Math.max(0, Config.npIdleMinutes(activity)) * 60_000L;
+    }
+
+    /**
+     * The bar appears when music starts and stays through pauses only for the configured idle
+     * window. A paused session at boot/restart leaves playedSinceBoot false and never shows.
+     */
+    private boolean shouldShow(MediaController controller) {
+        if (activePlayback(controller)) {
+            playedSinceBoot = true;
+            lastPlayedAt = SystemClock.elapsedRealtime();
+            handler.removeCallbacks(idleHide);
+            return true;
+        }
+        if (!playedSinceBoot) return false;
+        long idle = idleMillis();
+        if (idle <= 0) return true;   // Never
+        long now = SystemClock.elapsedRealtime();
+        long deadline = lastPlayedAt + idle;
+        if (now >= deadline) {
+            playedSinceBoot = false;
+            handler.removeCallbacks(idleHide);
+            return false;
+        }
+        handler.removeCallbacks(idleHide);
+        handler.postDelayed(idleHide, deadline - now);
+        return true;
+    }
+
+    private void hideIfIdle() {
+        if (activePlayback(active)) {
+            lastPlayedAt = SystemClock.elapsedRealtime();
+            return;
+        }
+        if (!playedSinceBoot) return;
+        long idle = idleMillis();
+        long now = SystemClock.elapsedRealtime();
+        if (idle > 0 && now < lastPlayedAt + idle) {
+            handler.postDelayed(idleHide, lastPlayedAt + idle - now);
+            return;
+        }
+        playedSinceBoot = false;
+        show(null);
     }
 
     private void updatePlayState(MediaController controller) {

@@ -137,6 +137,41 @@
                 android:paddingStart="4dp"
                 android:paddingEnd="4dp">
 
+        <LinearLayout
+            android:id="@+id/npProgress"
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingEnd="14dp">
+
+            <TextView
+                android:id="@+id/npElapsed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="10dp"
+                android:fontFamily="monospace"
+                android:textColor="#CCFFFFFF"
+                android:textSize="11sp" />
+
+            <com.gathin.tvhome.WaveformSeekBar
+                android:id="@+id/npWaveform"
+                android:layout_width="0dp"
+                android:layout_height="28dp"
+                android:layout_weight="1"
+                android:focusable="true"
+                android:contentDescription="@string/now_playing" />
+
+            <TextView
+                android:id="@+id/npDuration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:fontFamily="monospace"
+                android:textColor="#80FFFFFF"
+                android:textSize="11sp" />
+        </LinearLayout>
+
                 <LinearLayout
                     android:id="@+id/npControls"
                     android:layout_width="wrap_content"
@@ -213,43 +248,5 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Full-width timeline on the bottom edge, over the artwork. -->
-        <LinearLayout
-            android:id="@+id/npProgress"
-            android:layout_width="match_parent"
-            android:layout_height="28dp"
-            android:layout_gravity="bottom"
-            android:background="@drawable/now_playing_progress_scrim"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp">
-
-            <TextView
-                android:id="@+id/npElapsed"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="10dp"
-                android:fontFamily="monospace"
-                android:textColor="#CCFFFFFF"
-                android:textSize="11sp" />
-
-            <com.gathin.tvhome.WaveformSeekBar
-                android:id="@+id/npWaveform"
-                android:layout_width="0dp"
-                android:layout_height="28dp"
-                android:layout_weight="1"
-                android:focusable="true"
-                android:contentDescription="@string/now_playing" />
-
-            <TextView
-                android:id="@+id/npDuration"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:fontFamily="monospace"
-                android:textColor="#80FFFFFF"
-                android:textSize="11sp" />
-        </LinearLayout>
     </FrameLayout>
 </com.gathin.tvhome.NowPlayingBar>

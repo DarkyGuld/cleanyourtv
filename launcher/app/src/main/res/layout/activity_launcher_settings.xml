@@ -334,6 +334,7 @@
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npSizeChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npCornerRadiusChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npFullStyleChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
+                    <com.gathin.tvhome.SettingsRow android:id="@+id/npIdleChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npPrevChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/npNextChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
                     <com.gathin.tvhome.SettingsRow android:id="@+id/ambientNowPlayingChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
