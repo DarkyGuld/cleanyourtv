@@ -399,7 +399,7 @@ final class NowPlaying {
             auraLp.height = auraSize;
             aura.setLayoutParams(auraLp);
         }
-        int track = dp(size == 0 ? 150 : size == 1 ? 172 : size == 2 ? 190 : 210);
+        int track = dp(size == 0 ? 210 : size == 1 ? 220 : size == 2 ? 230 : 240);
         ViewGroup.LayoutParams trackLp = trackInfo.getLayoutParams();
         if (trackLp.width != track) {
             trackLp.width = track;
