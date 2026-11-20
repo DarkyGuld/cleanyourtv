@@ -29,6 +29,8 @@ import android.widget.Toast;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -38,9 +40,9 @@ import java.util.concurrent.RejectedExecutionException;
 
 /**
  * A small Continue Watching shelf above the dock, in the spirit of Aura's Top Shelf. It reads
- * Android TV's local Watch Next list when READ_TV_LISTINGS is granted; artwork is only loaded from
- * content:// providers and local files, because the launcher does not do network I/O. Nothing is
- * sent anywhere.
+ * Android TV's local Watch Next list when READ_TV_LISTINGS is granted; artwork comes from
+ * content:// providers, local files, or the https poster URL a provider publishes. Posters are
+ * fetched read-only with strict timeouts and a byte cap; nothing is ever uploaded.
  */
 final class TopShelf {
     /** Last Watch Next/media shelf size, for settings that only make sense with 2+ cards. */
@@ -796,14 +798,60 @@ final class TopShelf {
             return null;
         }
         String scheme = uri.getScheme();
-        if (scheme == null) uri = Uri.fromFile(new java.io.File(value));
-        else if (!"content".equals(scheme) && !"file".equals(scheme)) {
-            // http(s) artwork is deliberately skipped: the shelf only reads local providers/files.
+        if (scheme == null) {
+            uri = Uri.fromFile(new java.io.File(value));
+        } else if ("https".equals(scheme)) {
+            // Some Watch Next providers (for example NUVIO) publish poster URLs instead of local
+            // files. Fetch just the image, with timeouts and the same byte cap as local artwork.
+            Bitmap bitmap = decodeHttp(value);
+            if (bitmap != null) ART.put(value, bitmap);
+            return bitmap;
+        } else if (!"content".equals(scheme) && !"file".equals(scheme)) {
             return null;
         }
         Bitmap bitmap = decode(resolver, uri);
         if (bitmap != null) ART.put(value, bitmap);
         return bitmap;
+    }
+
+    /** Read-only HTTPS poster fetch: bounded size and timeouts, decoded the same way as local art. */
+    private InputStream openHttp(String value) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(value).openConnection();
+        connection.setConnectTimeout(4000);
+        connection.setReadTimeout(4000);
+        connection.setInstanceFollowRedirects(true);
+        int status = connection.getResponseCode();
+        String type = connection.getContentType();
+        if (status < 200 || status >= 300 || (type != null && !type.startsWith("image/"))) {
+            connection.disconnect();
+            return null;
+        }
+        InputStream in = connection.getInputStream();
+        return in == null ? null : new CappedInputStream(in, MAX_ART_BYTES);
+    }
+
+    private Bitmap decodeHttp(String value) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try (InputStream in = openHttp(value)) {
+                if (in == null) return null;
+                Bitmap probe = BitmapFactory.decodeStream(in, null, bounds);
+                if (probe != null) probe.recycle();
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+            int longest = Math.max(bounds.outWidth, bounds.outHeight);
+            int sample = 1;
+            while (longest / (sample * 2) >= TARGET_ART_SIDE) sample *= 2;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            try (InputStream in = openHttp(value)) {
+                if (in == null) return null;
+                return BitmapFactory.decodeStream(in, null, options);
+            }
+        } catch (Exception | OutOfMemoryError ignored) {
+            return null;
+        }
     }
 
     /**
